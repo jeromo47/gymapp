@@ -4,43 +4,41 @@ import { saveSession, getLastSetLike } from "@/app/history";
 import { loadTemplates, importTemplatesFromJSON, routineToSession, RoutineTemplate } from "@/app/routines";
 import type { Session, ExerciseLog, SetKind, SetDef } from "@/app/types";
 import { rid } from "@/app/id";
+import { recommendNextLoad, type SetTarget } from "@/app/progression";
 
-/* Utilidad: clon profundo simple */
+/* Deep clone helper */
 function deep<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
 }
 
 export function Today() {
-  // Biblioteca de plantillas y rutina seleccionada
   const [templates, setTemplates] = useState<RoutineTemplate[]>(() => loadTemplates());
   const [routineName, setRoutineName] = useState<string>(() => templates[0]?.name ?? "Mi rutina");
 
-  // Sesión activa + puntero de ejercicio
   const [session, setSession] = useState<Session>(() => {
-    // Fallback si no hay plantillas: seed mínimo
     if (templates[0]) return routineToSession(templates[0]);
     return seedSession();
   });
+
   const [idx, setIdx] = useState(0);
-
-  // Mapa "Último" (por ejercicio id+versión + kind + order)
   const [lastMap, setLastMap] = useState<Record<string, { weight?: number; reps: number }>>({});
+  const importRef = useRef<HTMLInputElement | null>(null);
 
-  // Regenerar sesión al cambiar de rutina
+  // Regenerar sesión al cambiar rutina
   useEffect(() => {
     const t = templates.find(x => x.name === routineName);
     if (t) {
       setSession(routineToSession(t));
       setIdx(0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routineName]);
 
   const current = session.exerciseLogs[idx];
 
-  // Precarga "Último" por cada set del ejercicio actual
+  // Precargar últimos sets del ejercicio actual
   useEffect(() => {
-    const ex = current; if (!ex) return;
+    const ex = current;
+    if (!ex) return;
     (async () => {
       const base = `${ex.exercise_ref.id}@${ex.exercise_ref.version}`;
       const pairs = await Promise.all(
@@ -59,50 +57,42 @@ export function Today() {
       for (const [k, v] of pairs) m[k] = v;
       setLastMap(o => ({ ...o, ...m }));
     })();
-    // Recalcula también cuando avanzas de serie
   }, [idx, current?.exercise_ref.id, current?.exercise_ref.version, current?.completedSets, session.date]);
-
-  // Siguiente set a realizar (solo 1 visible)
-  const nextDef: SetDef | undefined = useMemo(() => {
-    if (!current) return undefined;
-    if (current.completedSets >= current.totalSetsPlan) return undefined;
-    return current.sets_snapshot[current.completedSets];
-  }, [current]);
 
   const isLastSetForExercise = useMemo(() => {
     const ex = current;
     return (ex?.completedSets ?? 0) >= (ex?.totalSetsPlan ?? 0);
   }, [current]);
 
-  // Autosave por cambio de sesión
   useEffect(() => { saveSession(session); }, [session]);
 
-  // Avanzar a siguiente ejercicio
   const goNextExercise = () => setIdx(i => Math.min(i + 1, session.exerciseLogs.length - 1));
 
-  const onRestFinished = () => { /* hook para vibración/sonido si quieres */ };
+  const onRestFinished = () => {};
 
-  // Guardar set actual (persistencia inmediata + descanso)
-  const onSaveSet = (input: { kind: SetKind; order: number; weight?: number; reps: number; rir?: number }) => {
+  const onSaveSet = (input: { kind: SetKind; order: number; weight?: number; reps: number }) => {
     setSession(s => {
       const copy = deep(s);
       const ex = copy.exerciseLogs[idx];
-      ex.setLogs.push({ kind: input.kind, order: input.order, reps: input.reps, weightInput: input.weight, rir: input.rir, techOK: true });
+      ex.setLogs.push({
+        kind: input.kind,
+        order: input.order,
+        reps: input.reps,
+        weightInput: input.weight,
+        techOK: true
+      });
       ex.completedSets = Math.min(ex.completedSets + 1, ex.totalSetsPlan);
-      // Guardado inmediato y fiable
       saveSession(copy);
       return copy;
     });
-    // Dispara descanso global (60s)
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
-  // Fecha "Hoy" abreviada (ej. "lun, 03 nov")
   const todayLabel = new Date().toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
 
   return (
     <div>
-      {/* Header con fecha + selector + botón Importar (oculto esquina sup. derecha) */}
+      {/* HEADER: Fecha + selector + botón Importar oculto */}
       <header className="card glass header-rel" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>Hoy</h2>
@@ -110,36 +100,47 @@ export function Today() {
           <select
             value={routineName}
             onChange={(e) => setRoutineName(e.target.value)}
-            style={{ background: "rgba(255,255,255,.06)", color: "var(--text)", border: "1px solid var(--panel-border)", borderRadius: 10, padding: "6px 10px" }}
+            style={{
+              background: "rgba(255,255,255,.06)",
+              color: "var(--text)",
+              border: "1px solid var(--panel-border)",
+              borderRadius: 10,
+              padding: "6px 10px"
+            }}
           >
             {templates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
           </select>
         </div>
 
-        {/* Botón oculto para importar JSON de rutinas */}
+        {/* Botón oculto Importar JSON */}
         <label className="btn stealth-btn">
           Importar
           <input
+            ref={importRef}
             type="file"
             accept="application/json"
             style={{ display: "none" }}
-            onChange={async (e) => {
-              const f = e.target.files?.[0]; if (!f) return;
-              const raw = await f.text();
+            onChange={async () => {
+              const file = importRef.current?.files?.[0];
+              if (!file) return;
               try {
+                const raw = await file.text();
                 const merged = importTemplatesFromJSON(raw);
                 setTemplates(merged);
-                if (!merged.find(x => x.name === routineName) && merged[0]) setRoutineName(merged[0].name);
+                if (!merged.find(x => x.name === routineName) && merged[0]) {
+                  setRoutineName(merged[0].name);
+                }
               } catch (err: any) {
                 alert("Error importando: " + (err?.message ?? String(err)));
+              } finally {
+                if (importRef.current) importRef.current.value = "";
               }
-              e.currentTarget.value = "";
             }}
           />
         </label>
       </header>
 
-      {/* Lista de ejercicios; el activo muestra 1 solo set (el siguiente) */}
+      {/* Lista de ejercicios */}
       {session.exerciseLogs.map((ex, i) => (
         <ExerciseCard
           key={ex.exercise_ref.id}
@@ -163,7 +164,7 @@ export function Today() {
   );
 }
 
-/* ---------- Tarjeta de ejercicio (1 set visible si currentOnly=true) ---------- */
+/* ---------- CARD DE EJERCICIO ---------- */
 function ExerciseCard({
   ex, active, getLast, onSave, currentOnly
 }: {
@@ -171,7 +172,7 @@ function ExerciseCard({
   active: boolean;
   currentOnly?: boolean;
   getLast: (k: SetKind, o: number) => ({ weight?: number; reps: number } | undefined);
-  onSave: (p: { kind: SetKind; order: number; weight?: number; reps: number; rir?: number }) => void;
+  onSave: (p: { kind: SetKind; order: number; weight?: number; reps: number }) => void;
 }) {
   const nextIndex = ex.completedSets;
   const nextSet = ex.sets_snapshot[nextIndex];
@@ -193,17 +194,18 @@ function ExerciseCard({
         {currentOnly ? (
           nextSet ? (
             <SetRow
-              key={`${ex.exercise_ref.id}-${ex.exercise_ref.version}-${nextSet.kind}-${nextSet.order}-${ex.completedSets}`} // remount al pasar de serie
+              key={`${ex.exercise_ref.id}-${nextSet.kind}-${nextSet.order}-${ex.completedSets}`}
               def={nextSet}
               last={getLast(nextSet.kind, nextSet.order)}
               onSave={onSave}
+              exerciseName={ex.name_snapshot}
             />
           ) : (
             <div className="muted">✅ Ejercicio completado</div>
           )
         ) : (
           ex.sets_snapshot.map((d, i) => (
-            <SetRow key={i} def={d} last={getLast(d.kind, d.order)} onSave={onSave} />
+            <SetRow key={i} def={d} last={getLast(d.kind, d.order)} onSave={onSave} exerciseName={ex.name_snapshot} />
           ))
         )}
       </div>
@@ -211,23 +213,24 @@ function ExerciseCard({
   );
 }
 
-/* ---------- SetRow: encabezado “Último …” + 3 filas (Kg, Reps, RIR) + Guardar ---------- */
+/* ---------- SET ROW ---------- */
 function SetRow({
-  def, last, onSave
-}:{
+  def, last, onSave, exerciseName
+}: {
   def: SetDef;
   last?: { weight?: number; reps: number };
-  onSave: (p: { kind:SetKind; order:number; weight?:number; reps:number }) => void;
+  onSave: (p: { kind: SetKind; order: number; weight?: number; reps: number }) => void;
+  exerciseName: string;
 }) {
-  const [w, setW]   = useState<number>(last?.weight ?? def.presetWeight ?? 0);
-  const [r, setR]   = useState<number>(last?.reps   ?? def.repMin);
+  const [w, setW] = useState<number>(last?.weight ?? def.presetWeight ?? 0);
+  const [r, setR] = useState<number>(last?.reps ?? def.repMin);
   const [touched, setTouched] = useState(false);
-
-  // Cooldown en botón Guardar
   const [cooldown, setCooldown] = useState<number>(0);
   const cdRef = useRef<number | null>(null);
+
+  // Cooldown
   useEffect(() => () => { if (cdRef.current) clearInterval(cdRef.current); }, []);
-  const startCooldown = (s:number) => {
+  const startCooldown = (s: number) => {
     if (cdRef.current) clearInterval(cdRef.current);
     setCooldown(s);
     cdRef.current = window.setInterval(() => {
@@ -238,7 +241,7 @@ function SetRow({
     }, 1000);
   };
 
-  // Si llega el "Último" después de montar y no has tocado, sincroniza
+  // Sincroniza si llega "last"
   useEffect(() => {
     if (!touched && last) {
       setW(last.weight ?? def.presetWeight ?? 0);
@@ -247,6 +250,20 @@ function SetRow({
   }, [last?.weight, last?.reps, touched, def.presetWeight]);
 
   const disabled = cooldown > 0;
+
+  // === RECOMENDACIÓN ===
+  const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName)
+    ? "compound"
+    : "isolation";
+
+  const target: SetTarget = {
+    repMin: def.repMin,
+    repMax: def.repMax,
+    kind: def.kind,
+    liftCategory
+  };
+
+  const rec = recommendNextLoad(target, last, def.presetWeight);
 
   const handleSave = () => {
     if (disabled) return;
@@ -257,7 +274,6 @@ function SetRow({
 
   return (
     <div className="card set" aria-busy={disabled ? "true" : "false"}>
-      {/* Cabecera con "Último …" */}
       <div className="set-header">
         <span className="badge">{def.kind}</span>
         <div className="set-badges">
@@ -267,9 +283,25 @@ function SetRow({
         </div>
       </div>
 
-      {/* Controles en 2 filas (Kg, Reps) + Guardar */}
+      {/* CHIP DE RECOMENDACIÓN */}
+      <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
+        <span className="badge">
+          {rec.action === "UP" ? "↑" : rec.action === "DOWN" ? "↓" : "＝"} {rec.suggestedWeight} kg
+        </span>
+        <small className="muted">{rec.objective}</small>
+        <button
+          className="btn"
+          style={{ padding: "6px 10px" }}
+          onClick={() => setW(rec.suggestedWeight)}
+          disabled={disabled}
+        >
+          Aplicar
+        </button>
+      </div>
+
+      {/* CONTROLES */}
       <div className="set-controls">
-        {/* Peso (kg) */}
+        {/* Peso */}
         <div className="control">
           <div className="label">Peso (kg)</div>
           <div className="row-mini">
@@ -300,8 +332,7 @@ function SetRow({
   );
 }
 
-
-/* ---------- Seed fallback si no hay plantillas cargadas ---------- */
+/* ---------- SEED POR DEFECTO ---------- */
 function seedSession(): Session {
   const make = (name: string, id: string, scheme: string, sets: SetDef[]): ExerciseLog => ({
     exercise_ref: { id, version: 1 },
