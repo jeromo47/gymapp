@@ -1,41 +1,68 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RestBar } from "@/components/RestBar";
 import { saveSession, getLastSetLike } from "@/app/history";
+import { loadTemplates, importTemplatesFromJSON, routineToSession, RoutineTemplate } from "@/app/routines";
 import type { Session, ExerciseLog, SetKind, SetDef } from "@/app/types";
 import { rid } from "@/app/id";
 
-function deep<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
+/* Utilidad: clon profundo simple */
+function deep<T>(x: T): T {
+  return JSON.parse(JSON.stringify(x));
+}
 
 export function Today() {
-  const [session, setSession] = useState<Session>(() => seedSession());
+  // Biblioteca de plantillas y rutina seleccionada
+  const [templates, setTemplates] = useState<RoutineTemplate[]>(() => loadTemplates());
+  const [routineName, setRoutineName] = useState<string>(() => templates[0]?.name ?? "Mi rutina");
+
+  // Sesión activa + puntero de ejercicio
+  const [session, setSession] = useState<Session>(() => {
+    // Fallback si no hay plantillas: seed mínimo
+    if (templates[0]) return routineToSession(templates[0]);
+    return seedSession();
+  });
   const [idx, setIdx] = useState(0);
+
+  // Mapa "Último" (por ejercicio id+versión + kind + order)
   const [lastMap, setLastMap] = useState<Record<string, { weight?: number; reps: number }>>({});
+
+  // Regenerar sesión al cambiar de rutina
+  useEffect(() => {
+    const t = templates.find(x => x.name === routineName);
+    if (t) {
+      setSession(routineToSession(t));
+      setIdx(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routineName]);
 
   const current = session.exerciseLogs[idx];
 
-  // Precarga "Últ" por set (id+ver+kind+order). Recalcula al cambiar de ejercicio o de serie.
+  // Precarga "Último" por cada set del ejercicio actual
   useEffect(() => {
     const ex = current; if (!ex) return;
     (async () => {
       const base = `${ex.exercise_ref.id}@${ex.exercise_ref.version}`;
-      const pairs = await Promise.all(ex.sets_snapshot.map(async d => {
-        const last = await getLastSetLike(
-          ex.exercise_ref.id,
-          ex.exercise_ref.version,
-          d.kind,
-          d.order,
-          session.date
-        );
-        return [`${base}#${d.kind}:${d.order}`, last] as const;
-      }));
+      const pairs = await Promise.all(
+        ex.sets_snapshot.map(async d => {
+          const last = await getLastSetLike(
+            ex.exercise_ref.id,
+            ex.exercise_ref.version,
+            d.kind,
+            d.order,
+            session.date
+          );
+          return [`${base}#${d.kind}:${d.order}`, last] as const;
+        })
+      );
       const m: Record<string, { weight?: number; reps: number } | undefined> = {};
       for (const [k, v] of pairs) m[k] = v;
       setLastMap(o => ({ ...o, ...m }));
     })();
-  // 👇 añadimos completedSets para que refresque al pasar a la siguiente serie
+    // Recalcula también cuando avanzas de serie
   }, [idx, current?.exercise_ref.id, current?.exercise_ref.version, current?.completedSets, session.date]);
 
-  // Siguiente set a realizar (solo uno visible)
+  // Siguiente set a realizar (solo 1 visible)
   const nextDef: SetDef | undefined = useMemo(() => {
     if (!current) return undefined;
     if (current.completedSets >= current.totalSetsPlan) return undefined;
@@ -47,28 +74,72 @@ export function Today() {
     return (ex?.completedSets ?? 0) >= (ex?.totalSetsPlan ?? 0);
   }, [current]);
 
-  // Persistencia local
+  // Autosave por cambio de sesión
   useEffect(() => { saveSession(session); }, [session]);
 
-  // Avanzar a ejercicio siguiente
+  // Avanzar a siguiente ejercicio
   const goNextExercise = () => setIdx(i => Math.min(i + 1, session.exerciseLogs.length - 1));
 
-  const onRestFinished = () => {};
+  const onRestFinished = () => { /* hook para vibración/sonido si quieres */ };
 
+  // Guardar set actual (persistencia inmediata + descanso)
   const onSaveSet = (input: { kind: SetKind; order: number; weight?: number; reps: number; rir?: number }) => {
     setSession(s => {
       const copy = deep(s);
       const ex = copy.exerciseLogs[idx];
       ex.setLogs.push({ kind: input.kind, order: input.order, reps: input.reps, weightInput: input.weight, rir: input.rir, techOK: true });
       ex.completedSets = Math.min(ex.completedSets + 1, ex.totalSetsPlan);
+      // Guardado inmediato y fiable
+      saveSession(copy);
       return copy;
     });
     // Dispara descanso global (60s)
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
+  // Fecha "Hoy" abreviada (ej. "lun, 03 nov")
+  const todayLabel = new Date().toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
+
   return (
     <div>
+      {/* Header con fecha + selector + botón Importar (oculto esquina sup. derecha) */}
+      <header className="card glass header-rel" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0 }}>Hoy</h2>
+          <span className="badge">{todayLabel}</span>
+          <select
+            value={routineName}
+            onChange={(e) => setRoutineName(e.target.value)}
+            style={{ background: "rgba(255,255,255,.06)", color: "var(--text)", border: "1px solid var(--panel-border)", borderRadius: 10, padding: "6px 10px" }}
+          >
+            {templates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+          </select>
+        </div>
+
+        {/* Botón oculto para importar JSON de rutinas */}
+        <label className="btn stealth-btn">
+          Importar
+          <input
+            type="file"
+            accept="application/json"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const f = e.target.files?.[0]; if (!f) return;
+              const raw = await f.text();
+              try {
+                const merged = importTemplatesFromJSON(raw);
+                setTemplates(merged);
+                if (!merged.find(x => x.name === routineName) && merged[0]) setRoutineName(merged[0].name);
+              } catch (err: any) {
+                alert("Error importando: " + (err?.message ?? String(err)));
+              }
+              e.currentTarget.value = "";
+            }}
+          />
+        </label>
+      </header>
+
+      {/* Lista de ejercicios; el activo muestra 1 solo set (el siguiente) */}
       {session.exerciseLogs.map((ex, i) => (
         <ExerciseCard
           key={ex.exercise_ref.id}
@@ -81,15 +152,21 @@ export function Today() {
       ))}
 
       <div className="footer-spacer" />
-      <RestBar seconds={60} onRestFinished={onRestFinished} isLastSetForExercise={isLastSetForExercise} onNext={goNextExercise} />
+
+      <RestBar
+        seconds={60}
+        onRestFinished={onRestFinished}
+        isLastSetForExercise={isLastSetForExercise}
+        onNext={goNextExercise}
+      />
     </div>
   );
 }
 
-/* ------- Tarjeta de ejercicio (solo 1 set visible si currentOnly=true) ------- */
+/* ---------- Tarjeta de ejercicio (1 set visible si currentOnly=true) ---------- */
 function ExerciseCard({
   ex, active, getLast, onSave, currentOnly
-}:{
+}: {
   ex: ExerciseLog;
   active: boolean;
   currentOnly?: boolean;
@@ -100,9 +177,15 @@ function ExerciseCard({
   const nextSet = ex.sets_snapshot[nextIndex];
 
   return (
-    <div className="card glass exercise" style={{ boxShadow: active ? "0 8px 28px rgba(0,0,0,.35)" : undefined, opacity: active ? 1 : .7 }}>
+    <div
+      className="card glass exercise"
+      style={{ boxShadow: active ? "0 8px 28px rgba(0,0,0,.35)" : undefined, opacity: active ? 1 : 0.7 }}
+    >
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-        <div className="row"><h3 style={{ margin: 0 }}>{ex.name_snapshot}</h3><span className="badge">{ex.completedSets}/{ex.totalSetsPlan}</span></div>
+        <div className="row">
+          <h3 style={{ margin: 0 }}>{ex.name_snapshot}</h3>
+          <span className="badge">{ex.completedSets}/{ex.totalSetsPlan}</span>
+        </div>
         <span className="muted" style={{ whiteSpace: "nowrap" }}>{ex.scheme_snapshot}</span>
       </div>
 
@@ -110,7 +193,7 @@ function ExerciseCard({
         {currentOnly ? (
           nextSet ? (
             <SetRow
-              key={`${ex.exercise_ref.id}-${ex.exercise_ref.version}-${nextSet.kind}-${nextSet.order}-${ex.completedSets}`} // fuerza remount al pasar de serie
+              key={`${ex.exercise_ref.id}-${ex.exercise_ref.version}-${nextSet.kind}-${nextSet.order}-${ex.completedSets}`} // remount al pasar de serie
               def={nextSet}
               last={getLast(nextSet.kind, nextSet.order)}
               onSave={onSave}
@@ -128,25 +211,24 @@ function ExerciseCard({
   );
 }
 
-/* ------- SetRow: cabecera “Último …”, filas Peso/Reps/RIR (- valor +), Guardar con ⏱ ------- */
+/* ---------- SetRow: encabezado “Último …” + 3 filas (Kg, Reps, RIR) + Guardar ---------- */
 function SetRow({
   def, last, onSave
-}:{
+}: {
   def: SetDef;
   last?: { weight?: number; reps: number };
-  onSave: (p:{kind:SetKind;order:number;weight?:number;reps:number;rir?:number}) => void;
+  onSave: (p: { kind: SetKind; order: number; weight?: number; reps: number; rir?: number }) => void;
 }) {
-  // Valores iniciales = último si existe, si no, preset/repMin
   const [w, setW] = useState<number>(last?.weight ?? def.presetWeight ?? 0);
   const [r, setR] = useState<number>(last?.reps ?? def.repMin);
   const [rir, setRIR] = useState<number>(1);
   const [touched, setTouched] = useState(false);
 
-  // Cooldown del botón Guardar
+  // Cooldown en botón Guardar
   const [cooldown, setCooldown] = useState<number>(0);
   const cdRef = useRef<number | null>(null);
 
-  // Si llega el "último" después de montar y no has tocado, sincroniza
+  // Si llega el "Último" después de montar y no has tocado, sincroniza
   useEffect(() => {
     if (!touched && last) {
       setW(last.weight ?? def.presetWeight ?? 0);
@@ -156,7 +238,7 @@ function SetRow({
 
   useEffect(() => () => { if (cdRef.current) clearInterval(cdRef.current); }, []);
 
-  const startCooldown = (s:number) => {
+  const startCooldown = (s: number) => {
     if (cdRef.current) clearInterval(cdRef.current);
     setCooldown(s);
     cdRef.current = window.setInterval(() => {
@@ -178,87 +260,62 @@ function SetRow({
 
   return (
     <div className="card set" aria-busy={disabled ? "true" : "false"}>
-      {/* Cabecera con “Último __ kg × __ rep” alineado al mockup */}
+      {/* Cabecera con "Último …" */}
       <div className="set-header">
         <span className="badge">{def.kind}</span>
         <div className="set-badges">
           <span className="muted">
-            Último {last ? `${last.weight ?? 0} kg × ${last.reps} rep` : `—`}
+            Último {last ? `${last.weight ?? 0} kg × ${last.reps} rep` : "—"}
           </span>
         </div>
       </div>
 
-      {/* Controles en vertical: etiqueta arriba, fila (- valor +) abajo */}
-<div className="set-controls">
-  {/* Peso (kg) */}
-  <div className="control">
-    <div className="label">Peso (kg)</div>
-    <div className="row-mini">
-      <button
-        className="btn icon"
-        onClick={() => { setTouched(true); setW(prev => Math.max(0, +(prev - 1.25).toFixed(2))); }}
-        disabled={disabled}
-      >−</button>
-      <strong className="kpi">{w}</strong>
-      <button
-        className="btn icon"
-        onClick={() => { setTouched(true); setW(prev => +(prev + 1.25).toFixed(2)); }}
-        disabled={disabled}
-      >+</button>
-    </div>
-  </div>
+      {/* Controles en 3 filas (columna única): Kg, Reps, RIR */}
+      <div className="set-controls">
+        {/* Peso (kg) */}
+        <div className="control">
+          <div className="label">Peso (kg)</div>
+          <div className="row-mini">
+            <button className="btn icon" onClick={() => { setTouched(true); setW(prev => Math.max(0, +(prev - 1.25).toFixed(2))); }} disabled={disabled}>−</button>
+            <strong className="kpi">{w}</strong>
+            <button className="btn icon" onClick={() => { setTouched(true); setW(prev => +(prev + 1.25).toFixed(2)); }} disabled={disabled}>+</button>
+          </div>
+        </div>
 
-  {/* Repeticiones */}
-  <div className="control">
-    <div className="label">Reps</div>
-    <div className="row-mini">
-      <button
-        className="btn icon"
-        onClick={() => { setTouched(true); setR(prev => Math.max(1, prev - 1)); }}
-        disabled={disabled}
-      >−</button>
-      <strong className="kpi">{r}</strong>
-      <button
-        className="btn icon"
-        onClick={() => { setTouched(true); setR(prev => prev + 1); }}
-        disabled={disabled}
-      >+</button>
-    </div>
-  </div>
+        {/* Reps */}
+        <div className="control">
+          <div className="label">Reps</div>
+          <div className="row-mini">
+            <button className="btn icon" onClick={() => { setTouched(true); setR(prev => Math.max(1, prev - 1)); }} disabled={disabled}>−</button>
+            <strong className="kpi">{r}</strong>
+            <button className="btn icon" onClick={() => { setTouched(true); setR(prev => prev + 1); }} disabled={disabled}>+</button>
+          </div>
+        </div>
 
-  {/* RIR */}
-  <div className="control">
-    <div className="label">RIR</div>
-    <div className="row-mini">
-      <button
-        className="btn icon"
-        onClick={() => { setTouched(true); setRIR(prev => Math.max(0, prev - 1)); }}
-        disabled={disabled}
-      >−</button>
-      <strong className="kpi">{rir}</strong>
-      <button
-        className="btn icon"
-        onClick={() => { setTouched(true); setRIR(prev => prev + 1); }}
-        disabled={disabled}
-      >+</button>
-    </div>
-  </div>
+        {/* RIR */}
+        <div className="control">
+          <div className="label">RIR</div>
+          <div className="row-mini">
+            <button className="btn icon" onClick={() => { setTouched(true); setRIR(prev => Math.max(0, prev - 1)); }} disabled={disabled}>−</button>
+            <strong className="kpi">{rir}</strong>
+            <button className="btn icon" onClick={() => { setTouched(true); setRIR(prev => prev + 1); }} disabled={disabled}>+</button>
+          </div>
+        </div>
 
-  {/* Guardar */}
-  <button className="btn primary save" disabled={disabled} onClick={handleSave}>
-    {disabled
-      ? `⏱ ${String(Math.floor(cooldown / 60)).padStart(2, "0")}:${String(cooldown % 60).padStart(2, "0")}`
-      : "Guardar"}
-  </button>
-</div>
-
+        {/* Guardar */}
+        <button className="btn primary save" disabled={disabled} onClick={handleSave}>
+          {disabled
+            ? `⏱ ${String(Math.floor(cooldown / 60)).padStart(2, "0")}:${String(cooldown % 60).padStart(2, "0")}`
+            : "Guardar"}
+        </button>
+      </div>
     </div>
   );
 }
 
-/* ---------- Seed de ejemplo ---------- */
+/* ---------- Seed fallback si no hay plantillas cargadas ---------- */
 function seedSession(): Session {
-  const make = (name:string, id:string, scheme:string, sets:SetDef[]): ExerciseLog => ({
+  const make = (name: string, id: string, scheme: string, sets: SetDef[]): ExerciseLog => ({
     exercise_ref: { id, version: 1 },
     name_snapshot: name,
     scheme_snapshot: scheme,
@@ -269,16 +326,21 @@ function seedSession(): Session {
   });
 
   const ex1 = make("Press inclinado multipower", "press-inclinado", "1xTOP 6–9, 2xBOFF 12–15", [
-    { kind:"TOP",  order:1, repMin:6,  repMax:9,  presetWeight:27.5 },
-    { kind:"BOFF", order:2, repMin:12, repMax:15, presetWeight:22.5 },
-    { kind:"BOFF", order:3, repMin:12, repMax:15, presetWeight:22.5 }
+    { kind: "TOP", order: 1, repMin: 6, repMax: 9, presetWeight: 27.5 },
+    { kind: "BOFF", order: 2, repMin: 12, repMax: 15, presetWeight: 22.5 },
+    { kind: "BOFF", order: 3, repMin: 12, repMax: 15, presetWeight: 22.5 }
   ]);
 
   const ex2 = make("Press plano mancuernas", "press-mancuernas", "3xSET 10–15", [
-    { kind:"SET", order:1, repMin:10, repMax:15, presetWeight:18 },
-    { kind:"SET", order:2, repMin:10, repMax:15, presetWeight:18 },
-    { kind:"SET", order:3, repMin:10, repMax:15, presetWeight:18 }
+    { kind: "SET", order: 1, repMin: 10, repMax: 15, presetWeight: 18 },
+    { kind: "SET", order: 2, repMin: 10, repMax: 15, presetWeight: 18 },
+    { kind: "SET", order: 3, repMin: 10, repMax: 15, presetWeight: 18 }
   ]);
 
-  return { session_id: rid(), date: new Date().toISOString(), workoutName: "Push 1", exerciseLogs: [ex1, ex2] };
+  return {
+    session_id: rid(),
+    date: new Date().toISOString(),
+    workoutName: "Push 1",
+    exerciseLogs: [ex1, ex2]
+  };
 }
