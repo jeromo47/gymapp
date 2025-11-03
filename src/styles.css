@@ -251,3 +251,10 @@ body {
   width: 100%;
   justify-content: center;
 }
+/* Botón de importación escondido */
+.header-rel { position: relative; }
+.stealth-btn {
+  position: absolute; top: 8px; right: 8px;
+  opacity: .35; transition: .2s; border: 1px solid var(--panel-border);
+}
+.stealth-btn:hover { opacity: .9; }
