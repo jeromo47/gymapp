@@ -1,78 +1,8 @@
-:root {
-  --bg: #0b0e11;
-  --panel: rgba(255,255,255,0.05);
-  --border: rgba(255,255,255,0.12);
-  --brand: #00e0c7;
-  --brand-dark: #00b5a4;
-  --text: #f3f6fa;
-  --muted: #9aa4b2;
-}
-*{box-sizing:border-box}
-html,body,#root{height:100%;margin:0}
-body{
-  font-family:ui-sans-serif,system-ui,"SF Pro Text","Inter",Arial,sans-serif;
-  background:radial-gradient(1200px 800px at 80% -20%,rgba(0,224,199,.18),transparent 50%),var(--bg);
-  color:var(--text);
-}
-.container{max-width:980px;margin:0 auto;padding:24px}
-.glass{background:var(--panel);backdrop-filter:blur(10px)saturate(140%);border:1px solid var(--border);border-radius:16px}
-.card{padding:24px;margin:auto}
-.btn{display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:12px;border:1px solid transparent;background:#1a1f24;color:var(--text);cursor:pointer;transition:.2s}
-.btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
-.btn.primary{background:var(--brand);color:#061013;font-weight:700}
-.btn.primary:hover{background:var(--brand-dark)}
-.banner{margin:12px auto;max-width:980px;padding:12px 16px;border-radius:12px;border:1px solid var(--border)}
-.banner.error{background:rgba(255,93,93,.12);border-color:rgba(255,93,93,.3);color:#ffdede}
-.muted{color:var(--muted)}
-.spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,.2);border-top-color:var(--brand);border-radius:50%;animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.tabs { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; justify-content:space-around;
-  padding:10px 12px; background:rgba(10,15,20,.9); backdrop-filter:blur(8px);
-  border-top:1px solid var(--border); z-index:5; }
-.tab { flex:1; text-align:center; padding:10px 12px; border-radius:12px; color:var(--muted); cursor:pointer; }
-.tab.active { background:rgba(255,255,255,.06); color:var(--text); font-weight:700; }
-.kpi { font-variant-numeric:tabular-nums; }
-.row { display:flex; align-items:center; gap:10px; }
-.badge { font-size:12px; color:var(--muted); border:1px solid var(--border); padding:2px 8px; border-radius:999px; }
-.card.exercise { padding:16px; }
-.card.set { background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:12px; padding:10px; }
-.delta { font-size:12px; border-radius:999px; padding:2px 8px; color:#fff; }
-.delta.up { background:#0f5132; } .delta.down { background:#5c1a1a; }
-.footer-spacer { height:74px; } /* espacio para tabs y restbar */
-/* --- Fix layout sets en móvil --- */
-.row { display:flex; align-items:center; gap:10px; flex-wrap: wrap; }
+/* --- Sets: layout a prueba de solapes --- */
+.set-shell { display: grid; gap: 10px; }
+.set-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.set-badges { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 
-.card.exercise { padding:16px; }
-
-.card.set {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  margin: 0;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px;
-}
-
-/* Controles responsivos dentro de cada set */
-.set-controls {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
-  gap: 8px;
-  align-items: center;
-}
-.control { display:flex; align-items:center; gap:8px; min-width: 0; }
-.kpi { font-variant-numeric: tabular-nums; width: 56px; text-align: center; }
-
-/* Ajustes finos para pantallas pequeñas */
-@media (max-width: 420px) {
-  .kpi { width: 48px; }
-  .set-controls { grid-template-columns: 1fr 1fr 1fr; }
-  .set-controls .btn.primary { grid-column: 1 / -1; justify-self: end; }
-}
-/* Layout estable para los controles de cada set */
 .set-controls {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto; /* kg | reps | rir | guardar */
@@ -82,8 +12,7 @@ body{
 
 .control {
   display: grid;
-  grid-template-columns: auto 1fr auto; /* label | valor | boton */
-  grid-auto-flow: column;
+  grid-template-columns: auto 1fr auto;  /* label | valor | +/- */
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -92,44 +21,53 @@ body{
 .control .label {
   font-size: 12px;
   color: var(--muted);
-  width: 30px;       /* ancho fijo para que no “empuje” */
+  width: 36px;           /* estable para que no empuje */
   flex: 0 0 auto;
 }
 
 .kpi {
   font-variant-numeric: tabular-nums;
   text-align: center;
-  width: 64px;       /* ancho estable para cifras */
-  padding: 6px 8px;
+  width: 72px;           /* cifra estable, evita "bailes" */
+  padding: 8px 10px;
   border-radius: 10px;
   background: rgba(255,255,255,.04);
   border: 1px solid var(--border);
 }
 
-/* Botón “Guardar” con anchura estable y cuenta atrás legible */
+.btn.icon { width: 36px; justify-content: center; padding: 8px 0; }
+
 .btn.save {
-  min-width: 120px;
+  min-width: 140px;
   justify-content: center;
 }
-.btn.save[disabled] {
-  opacity: .6;
-  cursor: default;
+.btn.save[disabled] { opacity:.6; cursor:default; }
+
+/* RestBar: barra de progreso */
+.restbar {
+  position:fixed; left:0; right:0; bottom:0;
+  background: rgba(10,15,20,0.9); backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  display:flex; align-items:center; gap:12px;
+  z-index: 5;
+}
+.progress {
+  height: 6px; width: 100%; border-radius: 999px;
+  background: rgba(255,255,255,.08); overflow: hidden;
+}
+.progress > span {
+  display:block; height:100%; width:0%;
+  background: linear-gradient(90deg, var(--brand), #48e1ff);
+  transition: width .2s linear;
 }
 
-/* En móviles, apilar el botón debajo para evitar estrecheces */
+.footer-spacer { height: 92px; }
+
+/* Responsive compacto */
 @media (max-width: 480px) {
-  .set-controls {
-    grid-template-columns: 1fr 1fr;      /* kg | reps  */
-    grid-auto-rows: auto;
-  }
-  .set-controls .control:nth-child(3) {  /* RIR ocupa toda fila */
-    grid-column: 1 / -1;
-  }
-  .set-controls .btn.save {              /* Guardar ocupa toda fila */
-    grid-column: 1 / -1;
-    justify-self: end;
-  }
+  .set-controls { grid-template-columns: 1fr 1fr; }
+  .set-controls .control:nth-child(3) { grid-column: 1 / -1; } /* RIR ocupa fila completa */
+  .set-controls .btn.save { grid-column: 1 / -1; justify-self: end; }
+  .kpi { width: 64px; padding: 6px 8px; }
 }
-
-
-
