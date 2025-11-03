@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { RestBar } from "@/components/RestBar";
 import { saveSession, getLastSetLike } from "@/app/history";
 import type { Session, ExerciseLog, SetKind, SetDef } from "@/app/types";
