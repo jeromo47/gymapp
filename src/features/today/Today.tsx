@@ -189,44 +189,69 @@ function SetRow({
       </div>
 
       {/* Controles en vertical: etiqueta arriba, fila (- valor +) abajo */}
-      <div className="set-controls">
-        {/* Peso */}
-        <div className="control">
-          <div className="label">Peso</div>
-          <div className="row-mini">
-            <button className="btn icon" onClick={() => { setTouched(true); setW(prev => Math.max(0, +(prev - 1.25).toFixed(2))); }} disabled={disabled}>−</button>
-            <strong className="kpi">{w}</strong>
-            <button className="btn icon" onClick={() => { setTouched(true); setW(prev => +(prev + 1.25).toFixed(2)); }} disabled={disabled}>+</button>
-          </div>
-        </div>
+<div className="set-controls">
+  {/* Peso (kg) */}
+  <div className="control">
+    <div className="label">Peso (kg)</div>
+    <div className="row-mini">
+      <button
+        className="btn icon"
+        onClick={() => { setTouched(true); setW(prev => Math.max(0, +(prev - 1.25).toFixed(2))); }}
+        disabled={disabled}
+      >−</button>
+      <strong className="kpi">{w}</strong>
+      <button
+        className="btn icon"
+        onClick={() => { setTouched(true); setW(prev => +(prev + 1.25).toFixed(2)); }}
+        disabled={disabled}
+      >+</button>
+    </div>
+  </div>
 
-        {/* Reps */}
-        <div className="control">
-          <div className="label">Reps</div>
-          <div className="row-mini">
-            <button className="btn icon" onClick={() => { setTouched(true); setR(prev => Math.max(1, prev - 1)); }} disabled={disabled}>−</button>
-            <strong className="kpi">{r}</strong>
-            <button className="btn icon" onClick={() => { setTouched(true); setR(prev => prev + 1); }} disabled={disabled}>+</button>
-          </div>
-        </div>
+  {/* Repeticiones */}
+  <div className="control">
+    <div className="label">Reps</div>
+    <div className="row-mini">
+      <button
+        className="btn icon"
+        onClick={() => { setTouched(true); setR(prev => Math.max(1, prev - 1)); }}
+        disabled={disabled}
+      >−</button>
+      <strong className="kpi">{r}</strong>
+      <button
+        className="btn icon"
+        onClick={() => { setTouched(true); setR(prev => prev + 1); }}
+        disabled={disabled}
+      >+</button>
+    </div>
+  </div>
 
-        {/* RIR */}
-        <div className="control">
-          <div className="label">RIR</div>
-          <div className="row-mini">
-            <button className="btn icon" onClick={() => { setTouched(true); setRIR(prev => Math.max(0, prev - 1)); }} disabled={disabled}>−</button>
-            <strong className="kpi">{rir}</strong>
-            <button className="btn icon" onClick={() => { setTouched(true); setRIR(prev => prev + 1); }} disabled={disabled}>+</button>
-          </div>
-        </div>
+  {/* RIR */}
+  <div className="control">
+    <div className="label">RIR</div>
+    <div className="row-mini">
+      <button
+        className="btn icon"
+        onClick={() => { setTouched(true); setRIR(prev => Math.max(0, prev - 1)); }}
+        disabled={disabled}
+      >−</button>
+      <strong className="kpi">{rir}</strong>
+      <button
+        className="btn icon"
+        onClick={() => { setTouched(true); setRIR(prev => prev + 1); }}
+        disabled={disabled}
+      >+</button>
+    </div>
+  </div>
 
-        {/* Guardar */}
-        <button className="btn primary save" disabled={disabled} onClick={handleSave}>
-          {disabled
-            ? `⏱ ${String(Math.floor(cooldown / 60)).padStart(2, "0")}:${String(cooldown % 60).padStart(2, "0")}`
-            : "Guardar"}
-        </button>
-      </div>
+  {/* Guardar */}
+  <button className="btn primary save" disabled={disabled} onClick={handleSave}>
+    {disabled
+      ? `⏱ ${String(Math.floor(cooldown / 60)).padStart(2, "0")}:${String(cooldown % 60).padStart(2, "0")}`
+      : "Guardar"}
+  </button>
+</div>
+
     </div>
   );
 }
