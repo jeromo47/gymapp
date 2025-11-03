@@ -214,31 +214,20 @@ function ExerciseCard({
 /* ---------- SetRow: encabezado “Último …” + 3 filas (Kg, Reps, RIR) + Guardar ---------- */
 function SetRow({
   def, last, onSave
-}: {
+}:{
   def: SetDef;
   last?: { weight?: number; reps: number };
-  onSave: (p: { kind: SetKind; order: number; weight?: number; reps: number; rir?: number }) => void;
+  onSave: (p: { kind:SetKind; order:number; weight?:number; reps:number }) => void;
 }) {
-  const [w, setW] = useState<number>(last?.weight ?? def.presetWeight ?? 0);
-  const [r, setR] = useState<number>(last?.reps ?? def.repMin);
-  const [rir, setRIR] = useState<number>(1);
+  const [w, setW]   = useState<number>(last?.weight ?? def.presetWeight ?? 0);
+  const [r, setR]   = useState<number>(last?.reps   ?? def.repMin);
   const [touched, setTouched] = useState(false);
 
   // Cooldown en botón Guardar
   const [cooldown, setCooldown] = useState<number>(0);
   const cdRef = useRef<number | null>(null);
-
-  // Si llega el "Último" después de montar y no has tocado, sincroniza
-  useEffect(() => {
-    if (!touched && last) {
-      setW(last.weight ?? def.presetWeight ?? 0);
-      setR(last.reps);
-    }
-  }, [last?.weight, last?.reps, touched, def.presetWeight]);
-
   useEffect(() => () => { if (cdRef.current) clearInterval(cdRef.current); }, []);
-
-  const startCooldown = (s: number) => {
+  const startCooldown = (s:number) => {
     if (cdRef.current) clearInterval(cdRef.current);
     setCooldown(s);
     cdRef.current = window.setInterval(() => {
@@ -249,11 +238,19 @@ function SetRow({
     }, 1000);
   };
 
+  // Si llega el "Último" después de montar y no has tocado, sincroniza
+  useEffect(() => {
+    if (!touched && last) {
+      setW(last.weight ?? def.presetWeight ?? 0);
+      setR(last.reps);
+    }
+  }, [last?.weight, last?.reps, touched, def.presetWeight]);
+
   const disabled = cooldown > 0;
 
   const handleSave = () => {
     if (disabled) return;
-    onSave({ kind: def.kind, order: def.order, weight: w, reps: r, rir });
+    onSave({ kind: def.kind, order: def.order, weight: w, reps: r });
     startCooldown(60);
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
@@ -270,7 +267,7 @@ function SetRow({
         </div>
       </div>
 
-      {/* Controles en 3 filas (columna única): Kg, Reps, RIR */}
+      {/* Controles en 2 filas (Kg, Reps) + Guardar */}
       <div className="set-controls">
         {/* Peso (kg) */}
         <div className="control">
@@ -292,16 +289,6 @@ function SetRow({
           </div>
         </div>
 
-        {/* RIR */}
-        <div className="control">
-          <div className="label">RIR</div>
-          <div className="row-mini">
-            <button className="btn icon" onClick={() => { setTouched(true); setRIR(prev => Math.max(0, prev - 1)); }} disabled={disabled}>−</button>
-            <strong className="kpi">{rir}</strong>
-            <button className="btn icon" onClick={() => { setTouched(true); setRIR(prev => prev + 1); }} disabled={disabled}>+</button>
-          </div>
-        </div>
-
         {/* Guardar */}
         <button className="btn primary save" disabled={disabled} onClick={handleSave}>
           {disabled
@@ -312,6 +299,7 @@ function SetRow({
     </div>
   );
 }
+
 
 /* ---------- Seed fallback si no hay plantillas cargadas ---------- */
 function seedSession(): Session {
