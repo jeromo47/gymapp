@@ -97,7 +97,11 @@ function SetRow({
   const [rir,setRIR] = useState<number>(1);
   const [touched,setTouched] = useState(false);
 
-  // 🔄 Si aparece "last" y el usuario aún no tocó nada, sincroniza con el último
+  // Cuenta atrás local para el botón "Guardar"
+  const [cooldown, setCooldown] = useState<number>(0);
+  const cooldownRef = useRef<number | null>(null);
+
+  // Si aparece el "last" y aún no tocó nada el usuario, sincroniza
   useEffect(() => {
     if (!touched && last) {
       setW(last.weight ?? (def.presetWeight ?? 0));
@@ -105,17 +109,47 @@ function SetRow({
     }
   }, [last?.weight, last?.reps, touched, def.presetWeight]);
 
+  useEffect(() => {
+    return () => { if (cooldownRef.current) window.clearInterval(cooldownRef.current); };
+  }, []);
+
+  const startCooldown = (s: number) => {
+    if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+    setCooldown(s);
+    cooldownRef.current = window.setInterval(() => {
+      setCooldown(prev => {
+        if (prev <= 1) {
+          window.clearInterval(cooldownRef.current!);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   const delta = last ? { w: (w - (last.weight ?? 0)), r: (r - last.reps) } : undefined;
   const labelDelta = delta && (delta.w !== 0 || delta.r !== 0)
     ? <span className={`delta ${delta.w>0||delta.r>0?"up":"down"}`}>{(delta.w>0?"+":"")+delta.w}kg • {(delta.r>0?"+":"")+delta.r}rep</span>
     : null;
 
+  // Handlers con “touched” para no sobreescribir manualmente
   const decW = () => { setTouched(true); setW(prev=>Math.max(0, +(prev-1.25).toFixed(2))); };
   const incW = () => { setTouched(true); setW(prev=>+(prev+1.25).toFixed(2)); };
   const decR = () => { setTouched(true); setR(prev=>Math.max(1, prev-1)); };
   const incR = () => { setTouched(true); setR(prev=>prev+1); };
   const decRIR = () => { setTouched(true); setRIR(prev=>Math.max(0, prev-1)); };
   const incRIR = () => { setTouched(true); setRIR(prev=>prev+1); };
+
+  const handleSave = () => {
+    if (cooldown > 0) return; // evita doble click durante cuenta atrás
+    onSave({kind:def.kind, order:def.order, weight:w, reps:r, rir});
+    // Inicia temporizador local y global
+    startCooldown(60);
+    window.dispatchEvent(new CustomEvent("rest:start"));
+  };
+
+  const disabled = cooldown > 0;
 
   return (
     <div className="card set">
@@ -129,36 +163,34 @@ function SetRow({
 
       <div className="set-controls" style={{marginTop:8}}>
         <div className="control">
-          <div className="muted" style={{fontSize:12,minWidth:28}}>kg</div>
-          <button className="btn" onClick={decW}>−</button>
+          <div className="label">kg</div>
+          <button className="btn" onClick={decW} disabled={disabled}>−</button>
           <strong className="kpi">{w}</strong>
-          <button className="btn" onClick={incW}>+</button>
+          <button className="btn" onClick={incW} disabled={disabled}>+</button>
         </div>
 
         <div className="control">
-          <div className="muted" style={{fontSize:12,minWidth:28}}>Reps</div>
-          <button className="btn" onClick={decR}>−</button>
+          <div className="label">Reps</div>
+          <button className="btn" onClick={decR} disabled={disabled}>−</button>
           <strong className="kpi">{r}</strong>
-          <button className="btn" onClick={incR}>+</button>
+          <button className="btn" onClick={incR} disabled={disabled}>+</button>
         </div>
 
         <div className="control">
-          <div className="muted" style={{fontSize:12,minWidth:28}}>RIR</div>
-          <button className="btn" onClick={decRIR}>−</button>
+          <div className="label">RIR</div>
+          <button className="btn" onClick={decRIR} disabled={disabled}>−</button>
           <strong className="kpi">{rir}</strong>
-          <button className="btn" onClick={incRIR}>+</button>
+          <button className="btn" onClick={incRIR} disabled={disabled}>+</button>
         </div>
 
-        <button
-          className="btn primary"
-          onClick={()=>onSave({kind:def.kind, order:def.order, weight:w, reps:r, rir})}
-        >
-          Guardar
+        <button className="btn primary save" disabled={disabled} onClick={handleSave}>
+          {disabled ? `⏱ ${String(Math.floor(cooldown/60)).padStart(2,"0")}:${String(cooldown%60).padStart(2,"0")}` : "Guardar"}
         </button>
       </div>
     </div>
   );
 }
+
 
 
 function Control({ label, children }:{label:string; children:any}) {
