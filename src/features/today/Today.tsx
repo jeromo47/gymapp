@@ -99,7 +99,7 @@ export function Today() {
               border: "1px solid var(--panel-border)",
               borderRadius: 10,
               padding: "8px 12px",
-              fontSize: "1.6rem"   // ⟵ tamaño de texto aumentado
+              fontSize: "1.1rem"   // ⟵ tamaño de texto aumentado
             }}
           >
             {templates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
