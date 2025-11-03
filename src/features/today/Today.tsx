@@ -5,11 +5,10 @@ import { loadTemplates, importTemplatesFromJSON, routineToSession, RoutineTempla
 import type { Session, ExerciseLog, SetKind, SetDef } from "@/app/types";
 import { rid } from "@/app/id";
 import { recommendNextLoad, type SetTarget } from "@/app/progression";
+import { saveRemoteSet } from "@/app/remote";
 
 /* Deep clone helper */
-function deep<T>(x: T): T {
-  return JSON.parse(JSON.stringify(x));
-}
+function deep<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
 
 export function Today() {
   const [templates, setTemplates] = useState<RoutineTemplate[]>(() => loadTemplates());
@@ -27,32 +26,22 @@ export function Today() {
   // Regenerar sesión al cambiar rutina
   useEffect(() => {
     const t = templates.find(x => x.name === routineName);
-    if (t) {
-      setSession(routineToSession(t));
-      setIdx(0);
-    }
+    if (t) { setSession(routineToSession(t)); setIdx(0); }
   }, [routineName]);
 
   const current = session.exerciseLogs[idx];
 
-  // Precargar últimos sets del ejercicio actual
+  // Precargar "Último" por set
   useEffect(() => {
-    const ex = current;
-    if (!ex) return;
+    const ex = current; if (!ex) return;
     (async () => {
       const base = `${ex.exercise_ref.id}@${ex.exercise_ref.version}`;
-      const pairs = await Promise.all(
-        ex.sets_snapshot.map(async d => {
-          const last = await getLastSetLike(
-            ex.exercise_ref.id,
-            ex.exercise_ref.version,
-            d.kind,
-            d.order,
-            session.date
-          );
-          return [`${base}#${d.kind}:${d.order}`, last] as const;
-        })
-      );
+      const pairs = await Promise.all(ex.sets_snapshot.map(async d => {
+        const last = await getLastSetLike(
+          ex.exercise_ref.id, ex.exercise_ref.version, d.kind, d.order, session.date
+        );
+        return [`${base}#${d.kind}:${d.order}`, last] as const;
+      }));
       const m: Record<string, { weight?: number; reps: number } | undefined> = {};
       for (const [k, v] of pairs) m[k] = v;
       setLastMap(o => ({ ...o, ...m }));
@@ -67,24 +56,36 @@ export function Today() {
   useEffect(() => { saveSession(session); }, [session]);
 
   const goNextExercise = () => setIdx(i => Math.min(i + 1, session.exerciseLogs.length - 1));
-
   const onRestFinished = () => {};
 
   const onSaveSet = (input: { kind: SetKind; order: number; weight?: number; reps: number }) => {
     setSession(s => {
       const copy = deep(s);
       const ex = copy.exerciseLogs[idx];
-      ex.setLogs.push({
-        kind: input.kind,
-        order: input.order,
-        reps: input.reps,
-        weightInput: input.weight,
-        techOK: true
-      });
+      ex.setLogs.push({ kind: input.kind, order: input.order, reps: input.reps, weightInput: input.weight, techOK: true });
       ex.completedSets = Math.min(ex.completedSets + 1, ex.totalSetsPlan);
+
+      // Guardado local inmediato
       saveSession(copy);
+
+      // Guardado remoto (fire-and-forget)
+      const exRef = ex.exercise_ref;
+      void saveRemoteSet({
+        session_id: copy.session_id,
+        session_date_iso: copy.date,
+        workout_name: copy.workoutName,
+        exercise_id: exRef.id,
+        exercise_name: ex.name_snapshot,
+        set_kind: input.kind,
+        set_order: input.order,
+        weight: input.weight ?? null,
+        reps: input.reps
+      });
+
       return copy;
     });
+
+    // Descanso global
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
@@ -92,7 +93,7 @@ export function Today() {
 
   return (
     <div>
-      {/* HEADER: Fecha + selector + botón Importar oculto */}
+      {/* HEADER */}
       <header className="card glass header-rel" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>Hoy</h2>
@@ -100,13 +101,7 @@ export function Today() {
           <select
             value={routineName}
             onChange={(e) => setRoutineName(e.target.value)}
-            style={{
-              background: "rgba(255,255,255,.06)",
-              color: "var(--text)",
-              border: "1px solid var(--panel-border)",
-              borderRadius: 10,
-              padding: "6px 10px"
-            }}
+            style={{ background: "rgba(255,255,255,.06)", color: "var(--text)", border: "1px solid var(--panel-border)", borderRadius: 10, padding: "6px 10px" }}
           >
             {templates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
           </select>
@@ -127,9 +122,7 @@ export function Today() {
                 const raw = await file.text();
                 const merged = importTemplatesFromJSON(raw);
                 setTemplates(merged);
-                if (!merged.find(x => x.name === routineName) && merged[0]) {
-                  setRoutineName(merged[0].name);
-                }
+                if (!merged.find(x => x.name === routineName) && merged[0]) setRoutineName(merged[0].name);
               } catch (err: any) {
                 alert("Error importando: " + (err?.message ?? String(err)));
               } finally {
@@ -140,37 +133,41 @@ export function Today() {
         </label>
       </header>
 
-      {/* Lista de ejercicios */}
-      {session.exerciseLogs.map((ex, i) => (
-        <ExerciseCard
-          key={ex.exercise_ref.id}
-          active={i === idx}
-          ex={ex}
-          getLast={(k, o) => lastMap[`${ex.exercise_ref.id}@${ex.exercise_ref.version}#${k}:${o}`]}
-          onSave={onSaveSet}
-          currentOnly
-        />
-      ))}
+      {/* Ejercicios */}
+      {session.exerciseLogs.map((ex, i) => {
+        // Calcula el TOP de hoy (último TOP guardado de este ejercicio en esta sesión)
+        const topOfToday =
+          ex.setLogs.filter(s => s.kind === "TOP" && typeof s.weightInput === "number")
+            .slice(-1)[0]?.weightInput ?? undefined;
+
+        return (
+          <ExerciseCard
+            key={ex.exercise_ref.id}
+            active={i === idx}
+            ex={ex}
+            getLast={(k, o) => lastMap[`${ex.exercise_ref.id}@${ex.exercise_ref.version}#${k}:${o}`]}
+            onSave={onSaveSet}
+            currentOnly
+            topOfToday={topOfToday}
+          />
+        );
+      })}
 
       <div className="footer-spacer" />
 
-      <RestBar
-        seconds={60}
-        onRestFinished={onRestFinished}
-        isLastSetForExercise={isLastSetForExercise}
-        onNext={goNextExercise}
-      />
+      <RestBar seconds={60} onRestFinished={onRestFinished} isLastSetForExercise={isLastSetForExercise} onNext={goNextExercise} />
     </div>
   );
 }
 
 /* ---------- CARD DE EJERCICIO ---------- */
 function ExerciseCard({
-  ex, active, getLast, onSave, currentOnly
+  ex, active, getLast, onSave, currentOnly, topOfToday
 }: {
   ex: ExerciseLog;
   active: boolean;
   currentOnly?: boolean;
+  topOfToday?: number;
   getLast: (k: SetKind, o: number) => ({ weight?: number; reps: number } | undefined);
   onSave: (p: { kind: SetKind; order: number; weight?: number; reps: number }) => void;
 }) {
@@ -178,10 +175,7 @@ function ExerciseCard({
   const nextSet = ex.sets_snapshot[nextIndex];
 
   return (
-    <div
-      className="card glass exercise"
-      style={{ boxShadow: active ? "0 8px 28px rgba(0,0,0,.35)" : undefined, opacity: active ? 1 : 0.7 }}
-    >
+    <div className="card glass exercise" style={{ boxShadow: active ? "0 8px 28px rgba(0,0,0,.35)" : undefined, opacity: active ? 1 : 0.7 }}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
         <div className="row">
           <h3 style={{ margin: 0 }}>{ex.name_snapshot}</h3>
@@ -199,13 +193,21 @@ function ExerciseCard({
               last={getLast(nextSet.kind, nextSet.order)}
               onSave={onSave}
               exerciseName={ex.name_snapshot}
+              topOfToday={topOfToday}
             />
           ) : (
             <div className="muted">✅ Ejercicio completado</div>
           )
         ) : (
           ex.sets_snapshot.map((d, i) => (
-            <SetRow key={i} def={d} last={getLast(d.kind, d.order)} onSave={onSave} exerciseName={ex.name_snapshot} />
+            <SetRow
+              key={i}
+              def={d}
+              last={getLast(d.kind, d.order)}
+              onSave={onSave}
+              exerciseName={ex.name_snapshot}
+              topOfToday={topOfToday}
+            />
           ))
         )}
       </div>
@@ -215,12 +217,13 @@ function ExerciseCard({
 
 /* ---------- SET ROW ---------- */
 function SetRow({
-  def, last, onSave, exerciseName
+  def, last, onSave, exerciseName, topOfToday
 }: {
   def: SetDef;
   last?: { weight?: number; reps: number };
   onSave: (p: { kind: SetKind; order: number; weight?: number; reps: number }) => void;
   exerciseName: string;
+  topOfToday?: number;
 }) {
   const [w, setW] = useState<number>(last?.weight ?? def.presetWeight ?? 0);
   const [r, setR] = useState<number>(last?.reps ?? def.repMin);
@@ -228,42 +231,35 @@ function SetRow({
   const [cooldown, setCooldown] = useState<number>(0);
   const cdRef = useRef<number | null>(null);
 
-  // Cooldown
   useEffect(() => () => { if (cdRef.current) clearInterval(cdRef.current); }, []);
   const startCooldown = (s: number) => {
     if (cdRef.current) clearInterval(cdRef.current);
     setCooldown(s);
     cdRef.current = window.setInterval(() => {
-      setCooldown(prev => {
-        if (prev <= 1) { clearInterval(cdRef.current!); cdRef.current = null; return 0; }
-        return prev - 1;
-      });
+      setCooldown(prev => { if (prev <= 1) { clearInterval(cdRef.current!); cdRef.current = null; return 0; } return prev - 1; });
     }, 1000);
   };
 
-  // Sincroniza si llega "last"
+  // Si llega "last" y no has tocado, sincroniza (también BOFF desde TOP)
   useEffect(() => {
-    if (!touched && last) {
-      setW(last.weight ?? def.presetWeight ?? 0);
-      setR(last.reps);
+    if (!touched) {
+      // Si es BOFF y hay TOP del día, auto-ajusta a 70% recomendado
+      const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName) ? "compound" : "isolation";
+      const target: SetTarget = { repMin: def.repMin, repMax: def.repMax, kind: def.kind, liftCategory };
+      const rec = recommendNextLoad(target, last, def.presetWeight, topOfToday);
+      // Para BOFF, rec se basará en topOfToday; para otros, en last/preset
+      setW(rec.suggestedWeight);
+      setR(last?.reps ?? def.repMin);
     }
-  }, [last?.weight, last?.reps, touched, def.presetWeight]);
+  }, [def.kind, def.repMin, def.repMax, exerciseName, last?.weight, last?.reps, def.presetWeight, topOfToday, touched]);
 
   const disabled = cooldown > 0;
 
-  // === RECOMENDACIÓN ===
+  // Recomendación visible (UP/HOLD/DOWN + objetivo)
   const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName)
-    ? "compound"
-    : "isolation";
-
-  const target: SetTarget = {
-    repMin: def.repMin,
-    repMax: def.repMax,
-    kind: def.kind,
-    liftCategory
-  };
-
-  const rec = recommendNextLoad(target, last, def.presetWeight);
+    ? "compound" : "isolation";
+  const target: SetTarget = { repMin: def.repMin, repMax: def.repMax, kind: def.kind, liftCategory };
+  const rec = recommendNextLoad(target, last, def.presetWeight, topOfToday);
 
   const handleSave = () => {
     if (disabled) return;
@@ -283,23 +279,18 @@ function SetRow({
         </div>
       </div>
 
-      {/* CHIP DE RECOMENDACIÓN */}
+      {/* Recomendación */}
       <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
         <span className="badge">
           {rec.action === "UP" ? "↑" : rec.action === "DOWN" ? "↓" : "＝"} {rec.suggestedWeight} kg
         </span>
         <small className="muted">{rec.objective}</small>
-        <button
-          className="btn"
-          style={{ padding: "6px 10px" }}
-          onClick={() => setW(rec.suggestedWeight)}
-          disabled={disabled}
-        >
+        <button className="btn" style={{ padding: "6px 10px" }} onClick={() => setW(rec.suggestedWeight)} disabled={disabled}>
           Aplicar
         </button>
       </div>
 
-      {/* CONTROLES */}
+      {/* Controles */}
       <div className="set-controls">
         {/* Peso */}
         <div className="control">
