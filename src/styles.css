@@ -258,3 +258,7 @@ body {
   opacity: .35; transition: .2s; border: 1px solid var(--panel-border);
 }
 .stealth-btn:hover { opacity: .9; }
+/* Ajuste cuando solo hay 2 controles (Kg, Reps) */
+.set-controls { gap: 14px; }
+.control .label { margin-bottom: 2px; }
+
