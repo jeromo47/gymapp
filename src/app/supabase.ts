@@ -1,22 +1,8 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { ENV, envOk } from "./config";
+import { createClient } from "@supabase/supabase-js";
 
-let supabase: SupabaseClient;
+const url = import.meta.env.VITE_SUPABASE_URL!;
+const anon = import.meta.env.VITE_SUPABASE_ANON_KEY!;
 
-try {
-  if (!envOk()) {
-    console.warn("[GymApp] Variables de entorno ausentes. Cliente dummy.");
-    supabase = createClient("https://example.supabase.co", "ey_invalid_key", {
-      auth: { persistSession: false, autoRefreshToken: false, storage: undefined as any }
-    });
-  } else {
-    supabase = createClient(ENV.SUPABASE_URL!, ENV.SUPABASE_ANON!, { auth: { persistSession: true } });
-  }
-} catch (e) {
-  console.error("Error creando Supabase client", e);
-  supabase = createClient("https://example.supabase.co", "ey_invalid_key", {
-    auth: { persistSession: false, autoRefreshToken: false, storage: undefined as any }
-  });
-}
-
-export { supabase };
+export const supabase = createClient(url, anon, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+});
