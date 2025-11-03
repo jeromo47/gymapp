@@ -72,5 +72,64 @@ body{
   .set-controls { grid-template-columns: 1fr 1fr 1fr; }
   .set-controls .btn.primary { grid-column: 1 / -1; justify-self: end; }
 }
+/* Layout estable para los controles de cada set */
+.set-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto; /* kg | reps | rir | guardar */
+  gap: 10px;
+  align-items: center;
+}
+
+.control {
+  display: grid;
+  grid-template-columns: auto 1fr auto; /* label | valor | boton */
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.control .label {
+  font-size: 12px;
+  color: var(--muted);
+  width: 30px;       /* ancho fijo para que no “empuje” */
+  flex: 0 0 auto;
+}
+
+.kpi {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  width: 64px;       /* ancho estable para cifras */
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+}
+
+/* Botón “Guardar” con anchura estable y cuenta atrás legible */
+.btn.save {
+  min-width: 120px;
+  justify-content: center;
+}
+.btn.save[disabled] {
+  opacity: .6;
+  cursor: default;
+}
+
+/* En móviles, apilar el botón debajo para evitar estrecheces */
+@media (max-width: 480px) {
+  .set-controls {
+    grid-template-columns: 1fr 1fr;      /* kg | reps  */
+    grid-auto-rows: auto;
+  }
+  .set-controls .control:nth-child(3) {  /* RIR ocupa toda fila */
+    grid-column: 1 / -1;
+  }
+  .set-controls .btn.save {              /* Guardar ocupa toda fila */
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+
 
 
