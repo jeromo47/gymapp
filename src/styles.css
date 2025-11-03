@@ -26,3 +26,17 @@ body{
 .muted{color:var(--muted)}
 .spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,.2);border-top-color:var(--brand);border-radius:50%;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+.tabs { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; justify-content:space-around;
+  padding:10px 12px; background:rgba(10,15,20,.9); backdrop-filter:blur(8px);
+  border-top:1px solid var(--border); z-index:5; }
+.tab { flex:1; text-align:center; padding:10px 12px; border-radius:12px; color:var(--muted); cursor:pointer; }
+.tab.active { background:rgba(255,255,255,.06); color:var(--text); font-weight:700; }
+.kpi { font-variant-numeric:tabular-nums; }
+.row { display:flex; align-items:center; gap:10px; }
+.badge { font-size:12px; color:var(--muted); border:1px solid var(--border); padding:2px 8px; border-radius:999px; }
+.card.exercise { padding:16px; }
+.card.set { background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:12px; padding:10px; }
+.delta { font-size:12px; border-radius:999px; padding:2px 8px; color:#fff; }
+.delta.up { background:#0f5132; } .delta.down { background:#5c1a1a; }
+.footer-spacer { height:74px; } /* espacio para tabs y restbar */
+
