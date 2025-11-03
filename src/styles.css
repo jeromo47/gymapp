@@ -39,4 +39,38 @@ body{
 .delta { font-size:12px; border-radius:999px; padding:2px 8px; color:#fff; }
 .delta.up { background:#0f5132; } .delta.down { background:#5c1a1a; }
 .footer-spacer { height:74px; } /* espacio para tabs y restbar */
+/* --- Fix layout sets en móvil --- */
+.row { display:flex; align-items:center; gap:10px; flex-wrap: wrap; }
+
+.card.exercise { padding:16px; }
+
+.card.set {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  margin: 0;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+/* Controles responsivos dentro de cada set */
+.set-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: center;
+}
+.control { display:flex; align-items:center; gap:8px; min-width: 0; }
+.kpi { font-variant-numeric: tabular-nums; width: 56px; text-align: center; }
+
+/* Ajustes finos para pantallas pequeñas */
+@media (max-width: 420px) {
+  .kpi { width: 48px; }
+  .set-controls { grid-template-columns: 1fr 1fr 1fr; }
+  .set-controls .btn.primary { grid-column: 1 / -1; justify-self: end; }
+}
+
 
