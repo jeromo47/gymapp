@@ -12,11 +12,20 @@ export async function getLastSetLike(
   order: number,
   before: string
 ) {
-  const sessions = await db.sessions.orderBy("date").filter(x => x.date < before).reverse().toArray();
+  const sessions = await db.sessions
+    .orderBy("date")
+    .filter(x => x.date < before)
+    .reverse()
+    .toArray();
+
   for (const sess of sessions) {
-    const ex = sess.exerciseLogs.find(e => e.exercise_ref.id === id && e.exercise_ref.version === version);
+    const ex = sess.exerciseLogs.find(
+      e => e.exercise_ref.id === id && e.exercise_ref.version === version
+    );
     if (!ex) continue;
-    const set = ex.setLogs.find(s => s.kind === kind && s.order === order);
+
+    // 🔥 coge el ÚLTIMO set que coincide (no el primero)
+    const set = ex.setLogs.slice().reverse().find(s => s.kind === kind && s.order === order);
     if (set) return { weight: set.weightInput, reps: set.reps };
   }
   return undefined;
