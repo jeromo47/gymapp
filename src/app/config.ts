@@ -8,8 +8,8 @@ export function envOk(): boolean {
 }
 
 export function missingEnvMessage(): string {
-  const miss: string[] = [];
-  if (!ENV.SUPABASE_URL) miss.push("VITE_SUPABASE_URL");
-  if (!ENV.SUPABASE_ANON) miss.push("VITE_SUPABASE_ANON");
-  return `Faltan variables de entorno: ${miss.join(", ")}`;
+  const m: string[] = [];
+  if (!ENV.SUPABASE_URL) m.push("VITE_SUPABASE_URL");
+  if (!ENV.SUPABASE_ANON) m.push("VITE_SUPABASE_ANON");
+  return "Faltan variables: " + m.join(", ");
 }
