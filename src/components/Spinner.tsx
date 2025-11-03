@@ -1,3 +1,3 @@
 export function Spinner() {
-  return <div className="spinner" aria-label="Cargando" />;
+  return <div className="spinner" />;
 }
