@@ -88,15 +88,34 @@ function ExerciseCard({
 
 function SetRow({
   def, last, onSave
-}:{ def:SetDef; last?:{weight?:number;reps:number}; onSave:(p:{kind:SetKind;order:number;weight?:number;reps:number;rir?:number})=>void }) {
+}:{
+  def:SetDef; last?:{weight?:number;reps:number};
+  onSave:(p:{kind:SetKind;order:number;weight?:number;reps:number;rir?:number})=>void
+}) {
   const [w,setW] = useState<number>(last?.weight ?? (def.presetWeight ?? 0));
   const [r,setR] = useState<number>(last?.reps ?? def.repMin);
   const [rir,setRIR] = useState<number>(1);
-  const delta = last ? { w: (w - (last.weight ?? 0)), r: (r - last.reps) } : undefined;
+  const [touched,setTouched] = useState(false);
 
+  // 🔄 Si aparece "last" y el usuario aún no tocó nada, sincroniza con el último
+  useEffect(() => {
+    if (!touched && last) {
+      setW(last.weight ?? (def.presetWeight ?? 0));
+      setR(last.reps);
+    }
+  }, [last?.weight, last?.reps, touched, def.presetWeight]);
+
+  const delta = last ? { w: (w - (last.weight ?? 0)), r: (r - last.reps) } : undefined;
   const labelDelta = delta && (delta.w !== 0 || delta.r !== 0)
     ? <span className={`delta ${delta.w>0||delta.r>0?"up":"down"}`}>{(delta.w>0?"+":"")+delta.w}kg • {(delta.r>0?"+":"")+delta.r}rep</span>
     : null;
+
+  const decW = () => { setTouched(true); setW(prev=>Math.max(0, +(prev-1.25).toFixed(2))); };
+  const incW = () => { setTouched(true); setW(prev=>+(prev+1.25).toFixed(2)); };
+  const decR = () => { setTouched(true); setR(prev=>Math.max(1, prev-1)); };
+  const incR = () => { setTouched(true); setR(prev=>prev+1); };
+  const decRIR = () => { setTouched(true); setRIR(prev=>Math.max(0, prev-1)); };
+  const incRIR = () => { setTouched(true); setRIR(prev=>prev+1); };
 
   return (
     <div className="card set">
@@ -108,31 +127,39 @@ function SetRow({
         </div>
       </div>
 
-      <div className="row" style={{marginTop:8}}>
-        <Control label="kg">
-          <button className="btn" onClick={()=>setW(prev=>Math.max(0,+(prev-1.25).toFixed(2)))}>−</button>
-          <strong className="kpi" style={{width:68, textAlign:"center"}}>{w}</strong>
-          <button className="btn" onClick={()=>setW(prev=>+(prev+1.25).toFixed(2))}>+</button>
-        </Control>
+      <div className="set-controls" style={{marginTop:8}}>
+        <div className="control">
+          <div className="muted" style={{fontSize:12,minWidth:28}}>kg</div>
+          <button className="btn" onClick={decW}>−</button>
+          <strong className="kpi">{w}</strong>
+          <button className="btn" onClick={incW}>+</button>
+        </div>
 
-        <Control label="Reps">
-          <button className="btn" onClick={()=>setR(prev=>Math.max(1,prev-1))}>−</button>
-          <strong className="kpi" style={{width:42, textAlign:"center"}}>{r}</strong>
-          <button className="btn" onClick={()=>setR(prev=>prev+1)}>+</button>
-        </Control>
+        <div className="control">
+          <div className="muted" style={{fontSize:12,minWidth:28}}>Reps</div>
+          <button className="btn" onClick={decR}>−</button>
+          <strong className="kpi">{r}</strong>
+          <button className="btn" onClick={incR}>+</button>
+        </div>
 
-        <Control label="RIR">
-          <button className="btn" onClick={()=>setRIR(prev=>Math.max(0,prev-1))}>−</button>
-          <strong className="kpi" style={{width:42, textAlign:"center"}}>{rir}</strong>
-          <button className="btn" onClick={()=>setRIR(prev=>prev+1)}>+</button>
-        </Control>
+        <div className="control">
+          <div className="muted" style={{fontSize:12,minWidth:28}}>RIR</div>
+          <button className="btn" onClick={decRIR}>−</button>
+          <strong className="kpi">{rir}</strong>
+          <button className="btn" onClick={incRIR}>+</button>
+        </div>
 
-        <div style={{flex:1}} />
-        <button className="btn primary" onClick={()=>onSave({kind:def.kind, order:def.order, weight:w, reps:r, rir})}>Guardar</button>
+        <button
+          className="btn primary"
+          onClick={()=>onSave({kind:def.kind, order:def.order, weight:w, reps:r, rir})}
+        >
+          Guardar
+        </button>
       </div>
     </div>
   );
 }
+
 
 function Control({ label, children }:{label:string; children:any}) {
   return (
