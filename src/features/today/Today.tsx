@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RestBar } from "@/components/RestBar";
 import { saveSession, getLastSetLike } from "@/app/history";
 import type { Session, ExerciseLog, SetKind, SetDef } from "@/app/types";
@@ -11,25 +11,45 @@ export function Today() {
   const [idx, setIdx] = useState(0);
   const [lastMap, setLastMap] = useState<Record<string, { weight?: number; reps: number }>>({});
 
-  // precargar “Últ” del ejercicio actual
+  const current = session.exerciseLogs[idx];
+
+  // precargar "Últ" del ejercicio actual (todas sus series)
   useEffect(() => {
-    const ex = session.exerciseLogs[idx];
-    if (!ex) return;
+    const ex = current; if (!ex) return;
     (async () => {
       const base = `${ex.exercise_ref.id}@${ex.exercise_ref.version}`;
       const pairs = await Promise.all(ex.sets_snapshot.map(async d => {
         const last = await getLastSetLike(ex.exercise_ref.id, ex.exercise_ref.version, d.kind, d.order, session.date);
         return [`${base}#${d.kind}:${d.order}`, last] as const;
       }));
-      const m: any = {};
-      for (const [k,v] of pairs) m[k] = v;
+      const m: any = {}; for (const [k,v] of pairs) m[k] = v;
       setLastMap(o => ({ ...o, ...m }));
     })();
-  }, [idx, session.exerciseLogs, session.date]);
+  }, [idx, current?.exercise_ref.id, current?.exercise_ref.version, session.date]);
 
-  const current = session.exerciseLogs[idx];
-  const isLastSet = useMemo(() => (current?.completedSets ?? 0) >= (current?.totalSetsPlan ?? 0), [current]);
+  // ¿cuál es el próximo set a realizar?
+  const nextDef: SetDef | undefined = useMemo(() => {
+    const ex = current;
+    if (!ex) return undefined;
+    if (ex.completedSets >= ex.totalSetsPlan) return undefined;
+    return ex.sets_snapshot[ex.completedSets]; // la tarjeta avanza 1 a 1
+  }, [current]);
 
+  const isLastSetForExercise = useMemo(() => {
+    const ex = current;
+    return (ex?.completedSets ?? 0) >= (ex?.totalSetsPlan ?? 0);
+  }, [current]);
+
+  // guarda en DB cada cambio de sesión
+  useEffect(() => { saveSession(session); }, [session]);
+
+  // avanzar a siguiente ejercicio
+  const goNextExercise = () => setIdx(i => Math.min(i + 1, session.exerciseLogs.length - 1));
+
+  // callback desde RestBar al terminar el descanso
+  const onRestFinished = () => { /* aquí podemos añadir sonidos, vibración, etc. */ };
+
+  // handler de guardado del set visible
   const onSaveSet = (input: { kind: SetKind; order: number; weight?: number; reps: number; rir?: number }) => {
     setSession(s => {
       const copy = deep(s);
@@ -38,54 +58,72 @@ export function Today() {
       ex.completedSets = Math.min(ex.completedSets + 1, ex.totalSetsPlan);
       return copy;
     });
-    window.dispatchEvent(new CustomEvent("rest:start"));
+    // dispara descanso global (60s)
+    window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
-
-  useEffect(() => { saveSession(session); }, [session]);
-
-  const goNext = () => setIdx(i => Math.min(i + 1, session.exerciseLogs.length - 1));
 
   return (
     <div>
+      {/* Tarjeta del ejercicio actual + tarjetas "colapsadas" del resto */}
       {session.exerciseLogs.map((ex, i) => (
         <ExerciseCard
           key={ex.exercise_ref.id}
           active={i===idx}
           ex={ex}
+          // último registro del set actual
           getLast={(k,o)=>lastMap[`${ex.exercise_ref.id}@${ex.exercise_ref.version}#${k}:${o}`]}
           onSave={onSaveSet}
+          currentOnly={true}
         />
       ))}
+
       <div className="footer-spacer" />
-      <RestBar isLastSetForExercise={isLastSet} onNext={goNext} />
+
+      <RestBar
+        seconds={60}
+        onRestFinished={onRestFinished}
+        isLastSetForExercise={isLastSetForExercise}
+        onNext={goNextExercise}
+      />
     </div>
   );
 }
 
+/* -------- Tarjeta de ejercicio: solo 1 set visible (el siguiente) -------- */
 function ExerciseCard({
-  ex, active, getLast, onSave
+  ex, active, getLast, onSave, currentOnly
 }:{
   ex: ExerciseLog;
   active: boolean;
+  currentOnly?: boolean;
   getLast: (k:SetKind,o:number)=>({weight?:number;reps:number}|undefined);
   onSave: (p:{kind:SetKind;order:number;weight?:number;reps:number;rir?:number})=>void;
 }) {
+  const nextIndex = ex.completedSets;
+  const nextSet = ex.sets_snapshot[nextIndex]; // puede ser undefined si ya no hay sets
+
   return (
-    <div className="card glass exercise" style={{ boxShadow: active ? "0 8px 28px rgba(0,0,0,.35)" : undefined }}>
-      <div className="row" style={{justifyContent:"space-between"}}>
+    <div className="card glass exercise" style={{ boxShadow: active ? "0 8px 28px rgba(0,0,0,.35)" : undefined, opacity: active ? 1 : .7 }}>
+      <div className="row" style={{justifyContent:"space-between", alignItems:"baseline"}}>
         <div className="row"><h3 style={{margin:0}}>{ex.name_snapshot}</h3><span className="badge">{ex.completedSets}/{ex.totalSetsPlan}</span></div>
-        <span className="muted">{ex.scheme_snapshot}</span>
+        <span className="muted" style={{whiteSpace:"nowrap"}}>{ex.scheme_snapshot}</span>
       </div>
 
-      <div style={{display:"grid", gap:8, marginTop:8}}>
-        {ex.sets_snapshot.map((d, i) => (
-          <SetRow key={i} def={d} last={getLast(d.kind, d.order)} onSave={(payload)=>onSave(payload)} />
-        ))}
+      <div style={{marginTop:8}} className="set-shell">
+        {currentOnly
+          ? (nextSet
+              ? <SetRow def={nextSet} last={getLast(nextSet.kind, nextSet.order)} onSave={onSave} />
+              : <div className="muted">✅ Ejercicio completado</div>)
+          : ex.sets_snapshot.map((d, i) => (
+              <SetRow key={i} def={d} last={getLast(d.kind, d.order)} onSave={onSave} />
+            ))
+        }
       </div>
     </div>
   );
 }
 
+/* -------- SetRow con layout sin solapes + cooldown en botón -------- */
 function SetRow({
   def, last, onSave
 }:{
@@ -97,11 +135,11 @@ function SetRow({
   const [rir,setRIR] = useState<number>(1);
   const [touched,setTouched] = useState(false);
 
-  // Cuenta atrás local para el botón "Guardar"
+  // cooldown local (muestra ⏱ en botón y bloquea inputs)
   const [cooldown, setCooldown] = useState<number>(0);
-  const cooldownRef = useRef<number | null>(null);
+  const cdRef = useRef<number | null>(null);
 
-  // Si aparece el "last" y aún no tocó nada el usuario, sincroniza
+  // sincroniza con "último" si no has tocado nada
   useEffect(() => {
     if (!touched && last) {
       setW(last.weight ?? (def.presetWeight ?? 0));
@@ -109,78 +147,68 @@ function SetRow({
     }
   }, [last?.weight, last?.reps, touched, def.presetWeight]);
 
-  useEffect(() => {
-    return () => { if (cooldownRef.current) window.clearInterval(cooldownRef.current); };
-  }, []);
+  useEffect(() => () => { if (cdRef.current) clearInterval(cdRef.current); }, []);
 
-  const startCooldown = (s: number) => {
-    if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+  const startCooldown = (s:number) => {
+    if (cdRef.current) clearInterval(cdRef.current);
     setCooldown(s);
-    cooldownRef.current = window.setInterval(() => {
+    cdRef.current = window.setInterval(() => {
       setCooldown(prev => {
-        if (prev <= 1) {
-          window.clearInterval(cooldownRef.current!);
-          cooldownRef.current = null;
-          return 0;
-        }
+        if (prev <= 1) { clearInterval(cdRef.current!); cdRef.current = null; return 0; }
         return prev - 1;
       });
     }, 1000);
   };
 
+  const disabled = cooldown > 0;
   const delta = last ? { w: (w - (last.weight ?? 0)), r: (r - last.reps) } : undefined;
   const labelDelta = delta && (delta.w !== 0 || delta.r !== 0)
     ? <span className={`delta ${delta.w>0||delta.r>0?"up":"down"}`}>{(delta.w>0?"+":"")+delta.w}kg • {(delta.r>0?"+":"")+delta.r}rep</span>
     : null;
 
-  // Handlers con “touched” para no sobreescribir manualmente
-  const decW = () => { setTouched(true); setW(prev=>Math.max(0, +(prev-1.25).toFixed(2))); };
-  const incW = () => { setTouched(true); setW(prev=>+(prev+1.25).toFixed(2)); };
-  const decR = () => { setTouched(true); setR(prev=>Math.max(1, prev-1)); };
-  const incR = () => { setTouched(true); setR(prev=>prev+1); };
-  const decRIR = () => { setTouched(true); setRIR(prev=>Math.max(0, prev-1)); };
-  const incRIR = () => { setTouched(true); setRIR(prev=>prev+1); };
+  const dec = (fn: (x:number)=>number) => { setTouched(true); setW(fn(w)); };
+  const inc = (fn: (x:number)=>number) => { setTouched(true); setW(fn(w)); };
 
   const handleSave = () => {
-    if (cooldown > 0) return; // evita doble click durante cuenta atrás
+    if (disabled) return;
     onSave({kind:def.kind, order:def.order, weight:w, reps:r, rir});
-    // Inicia temporizador local y global
-    startCooldown(60);
-    window.dispatchEvent(new CustomEvent("rest:start"));
+    startCooldown(60);                          // ⏱ en el botón
+    window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 })); // y en la RestBar
   };
 
-  const disabled = cooldown > 0;
-
   return (
-    <div className="card set">
-      <div className="row" style={{justifyContent:"space-between"}}>
+    <div className="card set" aria-busy={disabled ? "true" : "false"}>
+      <div className="set-header">
         <span className="badge">{def.kind}</span>
-        <div className="row">
+        <div className="set-badges">
           {last && <span className="muted">Últ: {(last.weight ?? 0)}×{last.reps}</span>}
           {labelDelta}
         </div>
       </div>
 
-      <div className="set-controls" style={{marginTop:8}}>
+      <div className="set-controls">
+        {/* KG */}
         <div className="control">
           <div className="label">kg</div>
-          <button className="btn" onClick={decW} disabled={disabled}>−</button>
+          <button className="btn icon" onClick={()=>{ setTouched(true); setW(prev=>Math.max(0, +(prev-1.25).toFixed(2))); }} disabled={disabled}>−</button>
           <strong className="kpi">{w}</strong>
-          <button className="btn" onClick={incW} disabled={disabled}>+</button>
+          <button className="btn icon" onClick={()=>{ setTouched(true); setW(prev=>+(prev+1.25).toFixed(2)); }} disabled={disabled}>+</button>
         </div>
 
+        {/* Reps */}
         <div className="control">
           <div className="label">Reps</div>
-          <button className="btn" onClick={decR} disabled={disabled}>−</button>
+          <button className="btn icon" onClick={()=>{ setTouched(true); setR(prev=>Math.max(1, prev-1)); }} disabled={disabled}>−</button>
           <strong className="kpi">{r}</strong>
-          <button className="btn" onClick={incR} disabled={disabled}>+</button>
+          <button className="btn icon" onClick={()=>{ setTouched(true); setR(prev=>prev+1); }} disabled={disabled}>+</button>
         </div>
 
+        {/* RIR */}
         <div className="control">
           <div className="label">RIR</div>
-          <button className="btn" onClick={decRIR} disabled={disabled}>−</button>
+          <button className="btn icon" onClick={()=>{ setTouched(true); setRIR(prev=>Math.max(0, prev-1)); }} disabled={disabled}>−</button>
           <strong className="kpi">{rir}</strong>
-          <button className="btn" onClick={incRIR} disabled={disabled}>+</button>
+          <button className="btn icon" onClick={()=>{ setTouched(true); setRIR(prev=>prev+1); }} disabled={disabled}>+</button>
         </div>
 
         <button className="btn primary save" disabled={disabled} onClick={handleSave}>
@@ -191,17 +219,7 @@ function SetRow({
   );
 }
 
-
-
-function Control({ label, children }:{label:string; children:any}) {
-  return (
-    <div>
-      <div className="muted" style={{fontSize:12}}>{label}</div>
-      <div className="row">{children}</div>
-    </div>
-  );
-}
-
+/* ----- seed de ejemplo (igual que antes, conserva tus datos si ya tienes) ----- */
 function seedSession(): Session {
   const make = (name:string, id:string, scheme:string, sets:SetDef[]): ExerciseLog => ({
     exercise_ref: { id, version: 1 },
