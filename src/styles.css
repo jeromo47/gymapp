@@ -204,3 +204,50 @@ body {
     padding: 6px 8px;
   }
 }
+/* --- Set en columna: Kg, Reps, RIR en 3 filas --- */
+.set-controls {
+  display: grid;
+  grid-template-columns: 1fr;   /* siempre una columna */
+  gap: 12px;                    /* separación entre filas */
+  align-items: stretch;
+}
+
+.control {
+  display: grid;
+  grid-template-rows: auto auto;  /* etiqueta arriba, controles abajo */
+  gap: 8px;
+}
+
+.control .label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.control .row-mini {
+  display: grid;
+  grid-template-columns: auto 1fr auto; /* - | valor | + */
+  align-items: center;
+  gap: 10px;
+}
+
+.kpi {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  width: 100%;                 /* ocupa todo el ancho de la fila */
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--panel-border);
+}
+
+.btn.icon {
+  width: 42px;
+  justify-content: center;
+  padding: 10px 0;
+}
+
+/* Botón guardar ocupa su propia fila al final */
+.btn.save {
+  width: 100%;
+  justify-content: center;
+}
