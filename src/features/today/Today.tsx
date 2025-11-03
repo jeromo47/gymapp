@@ -64,28 +64,20 @@ export function Today() {
       const ex = copy.exerciseLogs[idx];
       ex.setLogs.push({ kind: input.kind, order: input.order, reps: input.reps, weightInput: input.weight, techOK: true });
       ex.completedSets = Math.min(ex.completedSets + 1, ex.totalSetsPlan);
-
-      // Guardado local inmediato
       saveSession(copy);
-
-      // Guardado remoto (fire-and-forget)
-      const exRef = ex.exercise_ref;
       void saveRemoteSet({
         session_id: copy.session_id,
         session_date_iso: copy.date,
         workout_name: copy.workoutName,
-        exercise_id: exRef.id,
+        exercise_id: ex.exercise_ref.id,
         exercise_name: ex.name_snapshot,
         set_kind: input.kind,
         set_order: input.order,
         weight: input.weight ?? null,
         reps: input.reps
       });
-
       return copy;
     });
-
-    // Descanso global
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
@@ -101,15 +93,22 @@ export function Today() {
           <select
             value={routineName}
             onChange={(e) => setRoutineName(e.target.value)}
-            style={{ background: "rgba(255,255,255,.06)", color: "var(--text)", border: "1px solid var(--panel-border)", borderRadius: 10, padding: "6px 10px" }}
+            style={{
+              background: "rgba(255,255,255,.06)",
+              color: "var(--text)",
+              border: "1px solid var(--panel-border)",
+              borderRadius: 10,
+              padding: "8px 12px",
+              fontSize: "1.6rem"   // ⟵ tamaño de texto aumentado
+            }}
           >
             {templates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
           </select>
         </div>
 
-        {/* Botón oculto Importar JSON */}
-        <label className="btn stealth-btn">
-          Importar
+        {/* Botón de importar JSON (icono pequeño) */}
+        <label className="btn stealth-btn" title="Importar rutinas (JSON)" style={{ padding: "6px 10px", gap: 6 }}>
+          <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>⤓</span>
           <input
             ref={importRef}
             type="file"
@@ -135,7 +134,6 @@ export function Today() {
 
       {/* Ejercicios */}
       {session.exerciseLogs.map((ex, i) => {
-        // Calcula el TOP de hoy (último TOP guardado de este ejercicio en esta sesión)
         const topOfToday =
           ex.setLogs.filter(s => s.kind === "TOP" && typeof s.weightInput === "number")
             .slice(-1)[0]?.weightInput ?? undefined;
@@ -240,22 +238,17 @@ function SetRow({
     }, 1000);
   };
 
-  // Si llega "last" y no has tocado, sincroniza (también BOFF desde TOP)
   useEffect(() => {
     if (!touched) {
-      // Si es BOFF y hay TOP del día, auto-ajusta a 70% recomendado
       const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName) ? "compound" : "isolation";
       const target: SetTarget = { repMin: def.repMin, repMax: def.repMax, kind: def.kind, liftCategory };
       const rec = recommendNextLoad(target, last, def.presetWeight, topOfToday);
-      // Para BOFF, rec se basará en topOfToday; para otros, en last/preset
       setW(rec.suggestedWeight);
       setR(last?.reps ?? def.repMin);
     }
   }, [def.kind, def.repMin, def.repMax, exerciseName, last?.weight, last?.reps, def.presetWeight, topOfToday, touched]);
 
   const disabled = cooldown > 0;
-
-  // Recomendación visible (UP/HOLD/DOWN + objetivo)
   const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName)
     ? "compound" : "isolation";
   const target: SetTarget = { repMin: def.repMin, repMax: def.repMax, kind: def.kind, liftCategory };
@@ -279,7 +272,6 @@ function SetRow({
         </div>
       </div>
 
-      {/* Recomendación */}
       <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
         <span className="badge">
           {rec.action === "UP" ? "↑" : rec.action === "DOWN" ? "↓" : "＝"} {rec.suggestedWeight} kg
@@ -290,9 +282,7 @@ function SetRow({
         </button>
       </div>
 
-      {/* Controles */}
       <div className="set-controls">
-        {/* Peso */}
         <div className="control">
           <div className="label">Peso (kg)</div>
           <div className="row-mini">
@@ -302,7 +292,6 @@ function SetRow({
           </div>
         </div>
 
-        {/* Reps */}
         <div className="control">
           <div className="label">Reps</div>
           <div className="row-mini">
@@ -312,7 +301,6 @@ function SetRow({
           </div>
         </div>
 
-        {/* Guardar */}
         <button className="btn primary save" disabled={disabled} onClick={handleSave}>
           {disabled
             ? `⏱ ${String(Math.floor(cooldown / 60)).padStart(2, "0")}:${String(cooldown % 60).padStart(2, "0")}`
