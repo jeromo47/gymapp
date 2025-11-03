@@ -2,14 +2,27 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="/icons/icon-192.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#0ea5a0" />
     <title>GymApp</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- Overlay de errores de arranque -->
+    <script>
+      (function(){
+        const o=document.createElement('div');
+        o.id='boot-error';
+        o.style.cssText='position:fixed;inset:0;background:#0b0e11;color:#fff;display:none;z-index:99999;padding:24px;font-family:ui-sans-serif,system-ui';
+        document.body.appendChild(o);
+        function show(m){o.style.display='block';o.innerHTML='<h2>Error al iniciar</h2><pre style="white-space:pre-wrap">'+m+'</pre>';}
+        window.addEventListener('error',e=>show(String(e.error||e.message||e)));
+        window.addEventListener('unhandledrejection',e=>show(String(e.reason||e)));
+      })();
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
