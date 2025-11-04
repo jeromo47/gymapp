@@ -80,10 +80,22 @@ function normalizeTemplate(t: any): RoutineTemplate {
 
 function mergeByName(a: RoutineTemplate[], b: RoutineTemplate[]): RoutineTemplate[] {
   const map = new Map<string, RoutineTemplate>();
-  for (const t of a) map.set(t.name, t);
-  for (const t of b) map.set(t.name, t); // b sobreescribe a en caso de duplicado
-  return [...map.values()].sort((x, y) => x.name.localeCompare(y.name, "es"));
+  // mantenemos el orden: primero los existentes (a), luego los nuevos (b)
+  for (const t of a) {
+    if (!map.has(t.name)) map.set(t.name, t);
+  }
+  for (const t of b) {
+    // si ya existía, lo sustituimos, pero sin cambiar el orden
+    if (map.has(t.name)) {
+      map.set(t.name, t);
+    } else {
+      map.set(t.name, t);
+    }
+  }
+  // devolvemos en el orden en que fueron insertadas (mantiene orden JSON)
+  return Array.from(map.values());
 }
+
 
 /* =========================
    Carga híbrida (local + remoto)
