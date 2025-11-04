@@ -1,68 +1,125 @@
+// src/components/RestBar.tsx
 import { useEffect, useRef, useState } from "react";
+import { ensureNotifyPermission, notifyRestEnd, buzz } from "@/app/notify";
 
-export function RestBar({
-  seconds = 60,
-  onRestFinished,
-  isLastSetForExercise,
-  onNext
-}: {
-  seconds?: number;
-  onRestFinished: () => void;
+type Props = {
+  seconds: number; // p.ej. 60
   isLastSetForExercise: boolean;
-  onNext: () => void;
-}) {
-  const [sec, setSec] = useState(0);
-  const [running, setRunning] = useState(false);
-  const t = useRef<number | null>(null);
-  const total = seconds;
+  onNext: () => void;          // pasar al siguiente ejercicio
+  onRestFinished?: () => void; // callback opcional
+};
 
-  // Escucha eventos globales para arrancar el descanso
+const LKEY = "restbar_end_at_v1";
+
+export function RestBar({ seconds, isLastSetForExercise, onNext, onRestFinished }: Props) {
+  const [remaining, setRemaining] = useState<number>(0);
+  const [running, setRunning] = useState<boolean>(false);
+  const endAtRef = useRef<number | null>(null);
+  const tickRef = useRef<number | null>(null);
+
+  // Arranca/actualiza desde almacenamiento si había un descanso activo
   useEffect(() => {
-    const h = (e: Event) => {
-      const custom = e as CustomEvent<number | undefined>;
-      start(custom.detail ?? total);
+    const saved = localStorage.getItem(LKEY);
+    if (saved) {
+      const endAt = Number(saved);
+      if (Number.isFinite(endAt) && endAt > Date.now()) {
+        endAtRef.current = endAt;
+        setRunning(true);
+        setRemaining(Math.max(0, Math.ceil((endAt - Date.now()) / 1000)));
+      } else {
+        localStorage.removeItem(LKEY);
+      }
+    }
+    // Permiso de notificaciones (best-effort)
+    ensureNotifyPermission();
+  }, []);
+
+  // TICK por timestamp (resiliente a background/lock)
+  useEffect(() => {
+    if (!running) return;
+    if (tickRef.current) clearInterval(tickRef.current);
+    tickRef.current = window.setInterval(() => {
+      const endAt = endAtRef.current;
+      if (!endAt) { setRunning(false); return; }
+      const ms = endAt - Date.now();
+      const sec = Math.max(0, Math.ceil(ms / 1000));
+      setRemaining(sec);
+      if (sec <= 0) {
+        clearInterval(tickRef.current!);
+        tickRef.current = null;
+        endAtRef.current = null;
+        localStorage.removeItem(LKEY);
+        setRunning(false);
+
+        // Señal (suena/vibra si el SO lo permite)
+        buzz();
+        notifyRestEnd();
+        onRestFinished?.();
+
+        // Si era el último set del ejercicio, permite pasar
+        if (isLastSetForExercise) onNext();
+      }
+    }, 1000) as unknown as number;
+
+    // Limpieza
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+      tickRef.current = null;
     };
-    window.addEventListener("rest:start", h as any);
-    return () => window.removeEventListener("rest:start", h as any);
-  }, [total]);
+  }, [running, isLastSetForExercise, onNext, onRestFinished]);
 
-  useEffect(() => () => { if (t.current) clearInterval(t.current); }, []);
+  // API pública: escucha el evento global "rest:start"
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      // detail: segundos (número) — si no, usa el por defecto del componente
+      const s = (ev as CustomEvent<number>).detail || seconds;
+      start(s);
+    };
+    window.addEventListener("rest:start", handler as EventListener);
+    return () => window.removeEventListener("rest:start", handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seconds]);
 
-  const start = (s: number) => {
-    if (t.current) clearInterval(t.current);
-    setSec(s); setRunning(true);
-    t.current = window.setInterval(() => {
-      setSec(prev => {
-        if (prev <= 1) {
-          clearInterval(t.current!);
-          t.current = null;
-          setRunning(false);
-          onRestFinished();       // Notifica fin de descanso
-          // Si era el último set del ejercicio, pasamos al siguiente
-          if (isLastSetForExercise) {
-            setTimeout(onNext, 800); // pequeño respiro visual
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-  const pause = () => { if (t.current) clearInterval(t.current); setRunning(false); };
-  const add30 = () => setSec(v => v + 30);
+  function start(s: number) {
+    const endAt = Date.now() + s * 1000;
+    endAtRef.current = endAt;
+    localStorage.setItem(LKEY, String(endAt));
+    setRemaining(s);
+    setRunning(true);
+  }
 
-  const pct = Math.max(0, Math.min(100, ((total - sec) / total) * 100));
+  function cancel() {
+    if (tickRef.current) clearInterval(tickRef.current);
+    tickRef.current = null;
+    endAtRef.current = null;
+    localStorage.removeItem(LKEY);
+    setRemaining(0);
+    setRunning(false);
+  }
+
+  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const ss = String(remaining % 60).padStart(2, "0");
 
   return (
-    <div className="restbar">
-      <strong>⏱ {String(Math.floor(sec/60)).padStart(2,"0")}:{String(sec%60).padStart(2,"0")}</strong>
-      <div className="progress"><span style={{ width: `${pct}%` }} /></div>
-      <button className="btn" onClick={add30}>+30s</button>
-      {!running
-        ? <button className="btn" onClick={() => start(total)}>Iniciar</button>
-        : <button className="btn" onClick={pause}>Pausar</button>}
-      <div style={{ flex: 1 }} />
-      {isLastSetForExercise && <button className="btn primary" onClick={onNext}>Siguiente →</button>}
+    <div className="restbar card glass" style={{ position: "fixed", left: 16, right: 16, bottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <div className="row" style={{ gap: 12, alignItems: "baseline" }}>
+        <strong>Descanso</strong>
+        <span className="badge">{mm}:{ss}</span>
+      </div>
+      <div className="row" style={{ gap: 8 }}>
+        {running ? (
+          <>
+            {/* Reiniciar: útil si guardas una nueva serie antes de tiempo */}
+            <button className="btn" onClick={() => start(seconds)}>Reiniciar</button>
+            <button className="btn" onClick={cancel}>Cancelar</button>
+          </>
+        ) : (
+          <button className="btn primary" onClick={() => start(seconds)}>Iniciar</button>
+        )}
+        {isLastSetForExercise && (
+          <button className="btn" onClick={onNext}>Siguiente</button>
+        )}
+      </div>
     </div>
   );
 }
