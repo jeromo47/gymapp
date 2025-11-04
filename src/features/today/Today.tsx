@@ -10,41 +10,54 @@ import { recommendNextLoad, type SetTarget } from "@/app/progression";
 import { saveRemoteSet } from "@/app/remote";
 import { ensureNotifyPermission } from "@/app/notify";
 
-/* Deep clone helper */
+/* ---------------------------------------------- */
+/*   Helpers: orden por número inicial del nombre  */
+/* ---------------------------------------------- */
+function numPrefix(s: string): number {
+  const m = s.match(/^\s*(\d+)[\.\-)]\s*/);
+  return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+}
+
+function sortByNumericPrefix<T extends { name: string }>(list: T[]): T[] {
+  return list.slice().sort((a, b) => {
+    const na = numPrefix(a.name);
+    const nb = numPrefix(b.name);
+    if (na !== nb) return na - nb;
+    return a.name.localeCompare(b.name, "es");
+  });
+}
+
 function deep<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
 
+/* ---------------------------------------------- */
+/*                    COMPONENT                   */
+/* ---------------------------------------------- */
 export function Today() {
-  // Estado principal
   const [templates, setTemplates] = useState<RoutineTemplate[]>([]);
   const [routineName, setRoutineName] = useState<string>("Mi rutina");
   const [session, setSession] = useState<Session>(() => seedSession());
   const [idx, setIdx] = useState(0);
-
-  // Últimos resultados por set (para recomendación)
   const [lastMap, setLastMap] = useState<Record<string, { weight?: number; reps: number }>>({});
-
-  // Refs
   const importRef = useRef<HTMLInputElement | null>(null);
   const askedNotifyRef = useRef(false);
 
-  // Carga híbrida de plantillas (local + remoto) al montar
+  // --- Cargar plantillas (ordenadas por número)
   useEffect(() => {
     (async () => {
-      const list = await loadTemplates(); // <- async
-      setTemplates(list);
-      const selected = list.find(x => x.name === routineName)?.name ?? (list[0]?.name ?? "Mi rutina");
+      const list = await loadTemplates();
+      const list2 = sortByNumericPrefix(list);
+      setTemplates(list2);
+      const selected = list2.find(x => x.name === routineName)?.name ?? (list2[0]?.name ?? "Mi rutina");
       setRoutineName(selected);
-      if (list.length > 0) {
-        // Si ya existía esa rutina, la mantenemos; si no, cogemos la primera
-        const t = list.find(x => x.name === selected) ?? list[0];
+      if (list2.length > 0) {
+        const t = list2.find(x => x.name === selected) ?? list2[0];
         setSession(routineToSession(t));
         setIdx(0);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Regenerar sesión al cambiar de rutina o al actualizar plantillas
+  // --- Regenerar sesión al cambiar rutina
   useEffect(() => {
     const t = templates.find(x => x.name === routineName);
     if (t) { setSession(routineToSession(t)); setIdx(0); }
@@ -52,7 +65,7 @@ export function Today() {
 
   const current = session.exerciseLogs[idx];
 
-  // Precargar "Último" por set para el ejercicio activo
+  // --- Cargar último peso/reps de cada set
   useEffect(() => {
     const ex = current; if (!ex) return;
     (async () => {
@@ -79,7 +92,7 @@ export function Today() {
   const goNextExercise = () => setIdx(i => Math.min(i + 1, session.exerciseLogs.length - 1));
   const onRestFinished = () => {};
 
-  const onSaveSet = (input: { kind: SetKind; order: number; weight?: number; reps: number }) => {
+  const onSaveSet = async (input: { kind: SetKind; order: number; weight?: number; reps: number }) => {
     setSession(s => {
       const copy = deep(s);
       const ex = copy.exerciseLogs[idx];
@@ -100,17 +113,17 @@ export function Today() {
       return copy;
     });
 
-    // Pedir permiso de notificaciones SOLO en el primer Guardar
     if (!askedNotifyRef.current) {
       askedNotifyRef.current = true;
-      void ensureNotifyPermission();
+      const granted = await ensureNotifyPermission();
+      if (granted) console.log("✅ Notificaciones permitidas");
     }
 
-    // Arranca/reinicia temporizador global (60s por defecto)
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
   const todayLabel = new Date().toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
+  const templatesForSelect = sortByNumericPrefix(templates);
 
   return (
     <div>
@@ -128,14 +141,14 @@ export function Today() {
               border: "1px solid var(--panel-border)",
               borderRadius: 10,
               padding: "8px 12px",
-              fontSize: "1.1rem"   // tamaño x2 aprox
+              fontSize: "1.6rem"
             }}
           >
-            {templates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+            {templatesForSelect.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
           </select>
         </div>
 
-        {/* Botón de importar JSON (icono pequeño) */}
+        {/* IMPORTAR JSON */}
         <label className="btn stealth-btn" title="Importar rutinas (JSON)" style={{ padding: "6px 10px", gap: 6 }}>
           <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>⤓</span>
           <input
@@ -148,9 +161,10 @@ export function Today() {
               if (!file) return;
               try {
                 const raw = await file.text();
-                const merged = importTemplatesFromJSON(raw); // guarda local + remoto si hay sesión
-                setTemplates(merged);
-                if (!merged.find(x => x.name === routineName) && merged[0]) setRoutineName(merged[0].name);
+                const merged = importTemplatesFromJSON(raw);
+                const sorted = sortByNumericPrefix(merged);
+                setTemplates(sorted);
+                if (!sorted.find(x => x.name === routineName) && sorted[0]) setRoutineName(sorted[0].name);
               } catch (err: any) {
                 alert("Error importando: " + (err?.message ?? String(err)));
               } finally {
@@ -161,7 +175,7 @@ export function Today() {
         </label>
       </header>
 
-      {/* Ejercicios */}
+      {/* LISTA DE EJERCICIOS */}
       {session.exerciseLogs.map((ex, i) => {
         const topOfToday =
           ex.setLogs.filter(s => s.kind === "TOP" && typeof s.weightInput === "number")
@@ -181,7 +195,6 @@ export function Today() {
       })}
 
       <div className="footer-spacer" />
-
       <RestBar
         seconds={60}
         onRestFinished={onRestFinished}
@@ -192,7 +205,7 @@ export function Today() {
   );
 }
 
-/* ---------- CARD DE EJERCICIO ---------- */
+/* -------------------- CARD DE EJERCICIO -------------------- */
 function ExerciseCard({
   ex, active, getLast, onSave, currentOnly, topOfToday
 }: {
@@ -247,7 +260,7 @@ function ExerciseCard({
   );
 }
 
-/* ---------- SET ROW ---------- */
+/* -------------------- SET ROW -------------------- */
 function SetRow({
   def, last, onSave, exerciseName, topOfToday
 }: {
@@ -259,7 +272,6 @@ function SetRow({
 }) {
   const [w, setW] = useState<number>(last?.weight ?? def.presetWeight ?? 0);
   const [r, setR] = useState<number>(last?.reps ?? def.repMin);
-  const [touched, setTouched] = useState(false);
   const [cooldown, setCooldown] = useState<number>(0);
   const cdRef = useRef<number | null>(null);
 
@@ -272,77 +284,52 @@ function SetRow({
     }, 1000);
   };
 
-  // Si no has tocado, aplica recomendación inicial (incluye BOFF 70% desde TOP del día)
-  useEffect(() => {
-    if (!touched) {
-      const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName) ? "compound" : "isolation";
-      const target: SetTarget = { repMin: def.repMin, repMax: def.repMax, kind: def.kind, liftCategory };
-      const rec = recommendNextLoad(target, last, def.presetWeight, topOfToday);
-      setW(rec.suggestedWeight);
-      setR(last?.reps ?? def.repMin);
-    }
-  }, [def.kind, def.repMin, def.repMax, exerciseName, last?.weight, last?.reps, def.presetWeight, topOfToday, touched]);
-
-  const disabled = cooldown > 0;
-  const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName)
-    ? "compound" : "isolation";
-  const target: SetTarget = { repMin: def.repMin, repMax: def.repMax, kind: def.kind, liftCategory };
-  const rec = recommendNextLoad(target, last, def.presetWeight, topOfToday);
-
   const handleSave = () => {
-    if (disabled) return;
+    if (cooldown > 0) return;
     onSave({ kind: def.kind, order: def.order, weight: w, reps: r });
     startCooldown(60);
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
+  const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName)
+    ? "compound" : "isolation";
+  const target: SetTarget = { repMin: def.repMin, repMax: def.repMax, kind: def.kind, liftCategory };
+  const rec = recommendNextLoad(target, last, def.presetWeight, topOfToday);
+
   return (
-    <div className="card set" aria-busy={disabled ? "true" : "false"}>
+    <div className="card set" aria-busy={cooldown > 0 ? "true" : "false"}>
       <div className="set-header">
         <span className="badge">{def.kind}</span>
-        <div className="set-badges">
-          <span className="muted">
-            Último {last ? `${last.weight ?? 0} kg × ${last.reps} rep` : "—"}
-          </span>
-        </div>
+        <span className="muted">Último {last ? `${last.weight ?? 0} kg × ${last.reps}` : "—"}</span>
       </div>
 
-      {/* Recomendación */}
       <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
-        <span className="badge">
-          {rec.action === "UP" ? "↑" : rec.action === "DOWN" ? "↓" : "＝"} {rec.suggestedWeight} kg
-        </span>
+        <span className="badge">{rec.action === "UP" ? "↑" : rec.action === "DOWN" ? "↓" : "＝"} {rec.suggestedWeight} kg</span>
         <small className="muted">{rec.objective}</small>
-        <button className="btn" style={{ padding: "6px 10px" }} onClick={() => setW(rec.suggestedWeight)} disabled={disabled}>
-          Aplicar
-        </button>
+        <button className="btn" onClick={() => setW(rec.suggestedWeight)}>Aplicar</button>
       </div>
 
-      {/* Controles */}
       <div className="set-controls">
-        {/* Peso */}
         <div className="control">
           <div className="label">Peso (kg)</div>
           <div className="row-mini">
-            <button className="btn icon" onClick={() => { setTouched(true); setW(prev => Math.max(0, +(prev - 1.25).toFixed(2))); }} disabled={disabled}>−</button>
+            <button className="btn icon" onClick={() => setW(w - 1.25)}>−</button>
             <strong className="kpi">{w}</strong>
-            <button className="btn icon" onClick={() => { setTouched(true); setW(prev => +(prev + 1.25).toFixed(2)); }} disabled={disabled}>+</button>
+            <button className="btn icon" onClick={() => setW(w + 1.25)}>+</button>
           </div>
         </div>
 
-        {/* Reps */}
         <div className="control">
           <div className="label">Reps</div>
           <div className="row-mini">
-            <button className="btn icon" onClick={() => { setTouched(true); setR(prev => Math.max(1, prev - 1)); }} disabled={disabled}>−</button>
+            <button className="btn icon" onClick={() => setR(r - 1)}>−</button>
             <strong className="kpi">{r}</strong>
-            <button className="btn icon" onClick={() => { setTouched(true); setR(prev => prev + 1); }} disabled={disabled}>+</button>
+            <button className="btn icon" onClick={() => setR(r + 1)}>+</button>
           </div>
         </div>
 
-        {/* Guardar */}
-        <button className="btn primary save" disabled={disabled} onClick={handleSave}>
-          {disabled
+        <button className="btn primary save" onClick={handleSave}>
+          {cooldown > 0
             ? `⏱ ${String(Math.floor(cooldown / 60)).padStart(2, "0")}:${String(cooldown % 60).padStart(2, "0")}`
             : "Guardar"}
         </button>
@@ -351,7 +338,7 @@ function SetRow({
   );
 }
 
-/* ---------- SEED POR DEFECTO ---------- */
+/* ---------- SESIÓN POR DEFECTO ---------- */
 function seedSession(): Session {
   const make = (name: string, id: string, scheme: string, sets: SetDef[]): ExerciseLog => ({
     exercise_ref: { id, version: 1 },
