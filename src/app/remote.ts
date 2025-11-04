@@ -77,8 +77,7 @@ export async function fetchTemplatesRemote(): Promise<RoutineTemplate[] | null> 
 
   const { data, error } = await supabase
     .from("routine_templates")
-    .select("payload")
-    .order("name", { ascending: true });
+    .select("payload");
 
   if (error) {
     console.error("❌ fetchTemplatesRemote error:", error.message);
