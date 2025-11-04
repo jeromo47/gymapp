@@ -1,4 +1,9 @@
 import { supabase } from "./supabase";
+import type { RoutineTemplate } from "./routines";
+
+/* =========================================================
+   1️⃣  Guardado de sesiones y sets (ya lo tenías)
+   ========================================================= */
 
 type SaveSetInput = {
   session_id: string;
@@ -14,9 +19,8 @@ type SaveSetInput = {
 
 /** Guarda/actualiza la cabecera de sesión y luego registra el set */
 export async function saveRemoteSet(input: SaveSetInput) {
-  // Asegura usuario (si usas login Google con Supabase Auth, esto devuelve el user)
   const { data: { user } } = await supabase.auth.getUser();
-  const user_id = user?.id ?? null; // si no hay login activo, guarda igual (opcional: abortar)
+  const user_id = user?.id ?? null;
 
   // Upsert de sesión
   await supabase.from("sessions").upsert({
@@ -36,4 +40,50 @@ export async function saveRemoteSet(input: SaveSetInput) {
     weight: input.weight,
     reps: input.reps
   });
+}
+
+/* =========================================================
+   2️⃣  Sincronización remota de rutinas (plantillas JSON)
+   ========================================================= */
+
+/**
+ * Guarda/actualiza todas las plantillas de rutinas del usuario
+ * en la tabla `routine_templates` (creada en Supabase).
+ */
+export async function upsertAllTemplatesRemote(list: RoutineTemplate[]) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return; // si no hay login, no hace nada
+
+  const rows = list.map(t => ({
+    user_id: user.id,
+    name: t.name,
+    payload: t // se guarda la rutina completa como JSON
+  }));
+
+  const { error } = await supabase
+    .from("routine_templates")
+    .upsert(rows, { onConflict: "user_id,name" });
+
+  if (error) console.error("❌ upsertAllTemplatesRemote error:", error.message);
+}
+
+/**
+ * Descarga todas las plantillas de rutinas del usuario actual
+ * desde la tabla `routine_templates`.
+ */
+export async function fetchTemplatesRemote(): Promise<RoutineTemplate[] | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("routine_templates")
+    .select("payload")
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("❌ fetchTemplatesRemote error:", error.message);
+    return null;
+  }
+
+  return (data ?? []).map(row => row.payload as RoutineTemplate);
 }
