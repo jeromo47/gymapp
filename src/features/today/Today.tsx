@@ -1,39 +1,58 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RestBar } from "@/components/RestBar";
 import { saveSession, getLastSetLike } from "@/app/history";
-import { loadTemplates, importTemplatesFromJSON, routineToSession, RoutineTemplate } from "@/app/routines";
+import {
+  loadTemplates, importTemplatesFromJSON, routineToSession, RoutineTemplate
+} from "@/app/routines";
 import type { Session, ExerciseLog, SetKind, SetDef } from "@/app/types";
 import { rid } from "@/app/id";
 import { recommendNextLoad, type SetTarget } from "@/app/progression";
 import { saveRemoteSet } from "@/app/remote";
-// 👇 NUEVO import
 import { ensureNotifyPermission } from "@/app/notify";
 
 /* Deep clone helper */
 function deep<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
 
 export function Today() {
-  const [templates, setTemplates] = useState<RoutineTemplate[]>(() => loadTemplates());
-  const [routineName, setRoutineName] = useState<string>(() => templates[0]?.name ?? "Mi rutina");
-
-  const [session, setSession] = useState<Session>(() => {
-    if (templates[0]) return routineToSession(templates[0]);
-    return seedSession();
-  });
-
+  // Estado principal
+  const [templates, setTemplates] = useState<RoutineTemplate[]>([]);
+  const [routineName, setRoutineName] = useState<string>("Mi rutina");
+  const [session, setSession] = useState<Session>(() => seedSession());
   const [idx, setIdx] = useState(0);
+
+  // Últimos resultados por set (para recomendación)
   const [lastMap, setLastMap] = useState<Record<string, { weight?: number; reps: number }>>({});
+
+  // Refs
   const importRef = useRef<HTMLInputElement | null>(null);
   const askedNotifyRef = useRef(false);
-  // Regenerar sesión al cambiar rutina
+
+  // Carga híbrida de plantillas (local + remoto) al montar
+  useEffect(() => {
+    (async () => {
+      const list = await loadTemplates(); // <- async
+      setTemplates(list);
+      const selected = list.find(x => x.name === routineName)?.name ?? (list[0]?.name ?? "Mi rutina");
+      setRoutineName(selected);
+      if (list.length > 0) {
+        // Si ya existía esa rutina, la mantenemos; si no, cogemos la primera
+        const t = list.find(x => x.name === selected) ?? list[0];
+        setSession(routineToSession(t));
+        setIdx(0);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Regenerar sesión al cambiar de rutina o al actualizar plantillas
   useEffect(() => {
     const t = templates.find(x => x.name === routineName);
     if (t) { setSession(routineToSession(t)); setIdx(0); }
-  }, [routineName]);
+  }, [routineName, templates]);
 
   const current = session.exerciseLogs[idx];
 
-  // Precargar "Último" por set
+  // Precargar "Último" por set para el ejercicio activo
   useEffect(() => {
     const ex = current; if (!ex) return;
     (async () => {
@@ -80,10 +99,14 @@ export function Today() {
       });
       return copy;
     });
+
+    // Pedir permiso de notificaciones SOLO en el primer Guardar
     if (!askedNotifyRef.current) {
       askedNotifyRef.current = true;
       void ensureNotifyPermission();
     }
+
+    // Arranca/reinicia temporizador global (60s por defecto)
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
@@ -105,7 +128,7 @@ export function Today() {
               border: "1px solid var(--panel-border)",
               borderRadius: 10,
               padding: "8px 12px",
-              fontSize: "1.1rem"   // ⟵ tamaño de texto aumentado
+              fontSize: "1.6rem"   // tamaño x2 aprox
             }}
           >
             {templates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
@@ -125,7 +148,7 @@ export function Today() {
               if (!file) return;
               try {
                 const raw = await file.text();
-                const merged = importTemplatesFromJSON(raw);
+                const merged = importTemplatesFromJSON(raw); // guarda local + remoto si hay sesión
                 setTemplates(merged);
                 if (!merged.find(x => x.name === routineName) && merged[0]) setRoutineName(merged[0].name);
               } catch (err: any) {
@@ -159,7 +182,12 @@ export function Today() {
 
       <div className="footer-spacer" />
 
-      <RestBar seconds={60} onRestFinished={onRestFinished} isLastSetForExercise={isLastSetForExercise} onNext={goNextExercise} />
+      <RestBar
+        seconds={60}
+        onRestFinished={onRestFinished}
+        isLastSetForExercise={isLastSetForExercise}
+        onNext={goNextExercise}
+      />
     </div>
   );
 }
@@ -244,6 +272,7 @@ function SetRow({
     }, 1000);
   };
 
+  // Si no has tocado, aplica recomendación inicial (incluye BOFF 70% desde TOP del día)
   useEffect(() => {
     if (!touched) {
       const liftCategory = /sentadilla|muerto|press|remo|dominadas|barra|multipower/i.test(exerciseName) ? "compound" : "isolation";
@@ -278,6 +307,7 @@ function SetRow({
         </div>
       </div>
 
+      {/* Recomendación */}
       <div className="row" style={{ justifyContent: "space-between", marginTop: 6 }}>
         <span className="badge">
           {rec.action === "UP" ? "↑" : rec.action === "DOWN" ? "↓" : "＝"} {rec.suggestedWeight} kg
@@ -288,7 +318,9 @@ function SetRow({
         </button>
       </div>
 
+      {/* Controles */}
       <div className="set-controls">
+        {/* Peso */}
         <div className="control">
           <div className="label">Peso (kg)</div>
           <div className="row-mini">
@@ -298,6 +330,7 @@ function SetRow({
           </div>
         </div>
 
+        {/* Reps */}
         <div className="control">
           <div className="label">Reps</div>
           <div className="row-mini">
@@ -307,6 +340,7 @@ function SetRow({
           </div>
         </div>
 
+        {/* Guardar */}
         <button className="btn primary save" disabled={disabled} onClick={handleSave}>
           {disabled
             ? `⏱ ${String(Math.floor(cooldown / 60)).padStart(2, "0")}:${String(cooldown % 60).padStart(2, "0")}`
