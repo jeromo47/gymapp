@@ -6,6 +6,8 @@ import type { Session, ExerciseLog, SetKind, SetDef } from "@/app/types";
 import { rid } from "@/app/id";
 import { recommendNextLoad, type SetTarget } from "@/app/progression";
 import { saveRemoteSet } from "@/app/remote";
+// 👇 NUEVO import
+import { ensureNotifyPermission } from "@/app/notify";
 
 /* Deep clone helper */
 function deep<T>(x: T): T { return JSON.parse(JSON.stringify(x)); }
@@ -22,7 +24,7 @@ export function Today() {
   const [idx, setIdx] = useState(0);
   const [lastMap, setLastMap] = useState<Record<string, { weight?: number; reps: number }>>({});
   const importRef = useRef<HTMLInputElement | null>(null);
-
+  const askedNotifyRef = useRef(false);
   // Regenerar sesión al cambiar rutina
   useEffect(() => {
     const t = templates.find(x => x.name === routineName);
@@ -78,6 +80,10 @@ export function Today() {
       });
       return copy;
     });
+    if (!askedNotifyRef.current) {
+      askedNotifyRef.current = true;
+      void ensureNotifyPermission();
+    }
     window.dispatchEvent(new CustomEvent("rest:start", { detail: 60 }));
   };
 
