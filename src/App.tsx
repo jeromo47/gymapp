@@ -7,6 +7,7 @@ import { Today } from "@/features/today/Today";
 import { History } from "@/features/history/History";
 import { NavTabs } from "@/components/NavTabs";
 import "@/styles.css";
+import { RoutineEditor } from "@/features/routines/RoutineEditor";
 
 type SBSession = Awaited<ReturnType<typeof supabase.auth.getSession>>["data"]["session"];
 
@@ -14,7 +15,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<SBSession | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<"today" | "history">("today");
+  const [tab, setTab] = useState<"today"|"history"|"routine">("today");
 
   useEffect(() => {
     // Semilla + suscripción a cambios de sesión
@@ -88,7 +89,7 @@ export function App() {
         </button>
       </header>
 
-      {tab === "today" ? <Today /> : <History />}
+      {tab==="today" ? <Today /> : tab==="history" ? <History /> : <RoutineEditor />}
 
       <NavTabs tab={tab} onTab={setTab} />
     </div>
