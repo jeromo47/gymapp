@@ -1,15 +1,11 @@
 // src/app/routines.ts
-import type { SetDef as SetDefT, Session, ExerciseLog } from "@/app/types";
+import { supabase } from "@/app/supabase";
 import { rid } from "@/app/id";
-import { upsertAllTemplatesRemote, fetchTemplatesRemote } from "./remote";
+import type { Session, ExerciseLog } from "@/app/types";
 
-/* =========================
-   Tipos de plantillas
-   ========================= */
-
+/* ─────────────────── Tipos ─────────────────── */
 export type SetKind = "TOP" | "BOFF" | "SET";
-
-export type SetDef = SetDefT | {
+export type SetDef = {
   kind: SetKind;
   order: number;
   repMin: number;
@@ -18,150 +14,154 @@ export type SetDef = SetDefT | {
 };
 
 export type ExerciseTemplate = {
-  id: string;            // identificador estable (slug)
-  name: string;          // nombre visible
-  scheme: string;        // ej: "1xTOP 6–9, 2xBOFF 12–15"
-  sets: SetDef[];        // definición de sets para este ejercicio
+  /** ID estable: NO debe cambiar al renombrar. */
+  id: string;
+  name: string;
+  scheme: string;
+  sets: SetDef[];
 };
 
 export type RoutineTemplate = {
-  name: string;                 // nombre de rutina (único por usuario)
-  exercises: ExerciseTemplate[]; // lista de ejercicios
+  name: string;
+  exercises: ExerciseTemplate[];
 };
 
-/* =========================
-   Almacenamiento local
-   ========================= */
-
-const LKEY = "routine_templates_v1";
+/* ──────────────── Local storage ─────────────── */
+const LS_KEY = "routine_templates_v1";
 
 export function loadTemplatesLocal(): RoutineTemplate[] {
   try {
-    const raw = localStorage.getItem(LKEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
   } catch {
     return [];
   }
 }
 
 export function saveTemplatesLocal(list: RoutineTemplate[]) {
-  localStorage.setItem(LKEY, JSON.stringify(list));
+  localStorage.setItem(LS_KEY, JSON.stringify(list));
 }
 
-/* =========================
-   Merge y normalización
-   ========================= */
+/* ──────────────── Remoto (Supabase) ─────────────── */
+export async function fetchTemplatesRemote(): Promise<RoutineTemplate[] | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
 
-function normalizeSetDef(s: any, i: number): SetDef {
-  // Normaliza claves y valores básicos
-  const kind: SetKind = s.kind ?? s.type ?? "SET";
-  const order: number = Number(s.order ?? i + 1);
-  const repMin: number = Number(s.repMin ?? s.repsMin ?? s.min ?? 8);
-  const repMax: number = Number(s.repMax ?? s.repsMax ?? s.max ?? 12);
-  const presetWeight = s.presetWeight != null ? Number(s.presetWeight) : undefined;
-  return { kind, order, repMin, repMax, presetWeight };
-}
+  const { data, error } = await supabase
+    .from("routine_templates")
+    .select("name,payload")
+    .order("name", { ascending: true }); // estable si nombras "1. …, 2. …"
 
-function normalizeExercise(e: any): ExerciseTemplate {
-  const id = String(e.id ?? e.slug ?? e.name ?? "exercise").toLowerCase().replace(/\s+/g, "-");
-  const name = String(e.name ?? e.title ?? id);
-  const scheme = String(e.scheme ?? e.plan ?? "");
-  const setsRaw = Array.isArray(e.sets) ? e.sets : [];
-  const sets = setsRaw.map(normalizeSetDef);
-  return { id, name, scheme, sets };
-}
-
-function normalizeTemplate(t: any): RoutineTemplate {
-  const name = String(t.name ?? t.title ?? "Mi rutina");
-  const exRaw = Array.isArray(t.exercises ?? t.ejercicios) ? (t.exercises ?? t.ejercicios) : [];
-  const exercises = exRaw.map(normalizeExercise);
-  return { name, exercises };
-}
-
-function mergeByName(a: RoutineTemplate[], b: RoutineTemplate[]): RoutineTemplate[] {
-  const map = new Map<string, RoutineTemplate>();
-  // mantenemos el orden: primero los existentes (a), luego los nuevos (b)
-  for (const t of a) {
-    if (!map.has(t.name)) map.set(t.name, t);
+  if (error) {
+    console.error("fetchTemplatesRemote:", error.message);
+    return null;
   }
-  for (const t of b) {
-    // si ya existía, lo sustituimos, pero sin cambiar el orden
-    if (map.has(t.name)) {
-      map.set(t.name, t);
-    } else {
-      map.set(t.name, t);
-    }
-  }
-  // devolvemos en el orden en que fueron insertadas (mantiene orden JSON)
-  return Array.from(map.values());
+  return (data ?? []).map(r => r.payload as RoutineTemplate);
 }
 
+export async function upsertAllTemplatesRemote(list: RoutineTemplate[]) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
 
-/* =========================
-   Carga híbrida (local + remoto)
-   ========================= */
+  const rows = list.map(t => ({
+    user_id: user.id,
+    name: t.name,
+    payload: t
+  }));
 
-/**
- * Carga plantillas desde local y, si hay sesión en Supabase,
- * hace fetch remoto y mergea, guardando el resultado de vuelta en local.
- *
- * Nota: devolvemos siempre algo (local como mínimo).
- */
+  const { error } = await supabase
+    .from("routine_templates")
+    .upsert(rows, { onConflict: "user_id,name" });
+
+  if (error) console.error("upsertAllTemplatesRemote:", error.message);
+}
+
+export async function saveTemplatesAll(list: RoutineTemplate[]) {
+  saveTemplatesLocal(list);
+  try { await upsertAllTemplatesRemote(list); } catch {}
+}
+
+/* ───────────── Carga híbrida (prioriza remoto) ───────────── */
 export async function loadTemplates(): Promise<RoutineTemplate[]> {
   const local = loadTemplatesLocal();
   try {
-    const remote = await fetchTemplatesRemote(); // null si no hay user
-    if (!remote) return local;
-    const merged = mergeByName(local, remote);
-    saveTemplatesLocal(merged);
-    return merged;
+    const remote = await fetchTemplatesRemote();
+    if (remote) {
+      saveTemplatesLocal(remote); // sincroniza cache local
+      return remote;
+    }
+    return local;
   } catch {
     return local;
   }
 }
 
-/** Si quieres llamarla explícitamente por claridad (alias) */
-export const loadTemplatesHybrid = loadTemplates;
+/* ───────────── Normalización con ID estable ───────────── */
+export function normalizeTemplate(t: any): RoutineTemplate {
+  const exs = Array.isArray(t?.exercises) ? t.exercises : [];
+  const exercises: ExerciseTemplate[] = exs.map((e: any, i: number) => ({
+    // Si falta id, se genera UNO SOLA VEZ (estable para esa plantilla)
+    id: typeof e?.id === "string" && e.id.trim() ? e.id : (e?._id ?? crypto.randomUUID()),
+    name: String(e?.name ?? `Ejercicio ${i + 1}`),
+    scheme: String(e?.scheme ?? ""),
+    sets: normalizeSets(e?.sets)
+  }));
 
-/* =========================
-   Guardar (local + remoto)
-   ========================= */
-
-export async function saveTemplatesAll(list: RoutineTemplate[]) {
-  saveTemplatesLocal(list);
-  // No rompe si no hay usuario (la función remota hace early return)
-  await upsertAllTemplatesRemote(list);
+  return {
+    name: String(t?.name ?? "Mi rutina"),
+    exercises
+  };
 }
 
-/* =========================
-   Importar desde JSON (string)
-   ========================= */
+function normalizeSets(arr: any): SetDef[] {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((s: any, i: number) => {
+    const kind: SetKind =
+      s?.kind === "TOP" || s?.kind === "BOFF" || s?.kind === "SET" ? s.kind : "SET";
+    const order = Number.isFinite(+s?.order) ? +s.order : i + 1;
+    const repMin = Number.isFinite(+s?.repMin) ? +s.repMin : 8;
+    const repMax = Number.isFinite(+s?.repMax) ? +s.repMax : Math.max(8, repMin);
+    const presetWeight = Number.isFinite(+s?.presetWeight) ? +s.presetWeight : undefined;
+    return { kind, order, repMin, repMax, presetWeight };
+  });
+}
 
+/* ───────────── Importar JSON (con numeración opcional) ───────────── */
 export function importTemplatesFromJSON(raw: string): RoutineTemplate[] {
   const data = JSON.parse(raw);
   const incoming: RoutineTemplate[] = Array.isArray(data)
     ? data.map(normalizeTemplate)
     : [normalizeTemplate(data)];
 
+  // Si no están numeradas, numera según orden de llegada: "1. Nombre", "2. Nombre", ...
+  const numbered = incoming.map((t, i) => {
+    const already = /^\d+\.\s/.test(t.name);
+    return already ? t : { ...t, name: `${i + 1}. ${t.name}` };
+  });
+
   const current = loadTemplatesLocal();
-  const merged = mergeByName(current, incoming);
-
-  // Guarda local + sube remoto (si hay sesión)
+  const merged = mergeByName(current, numbered); // respeta orden de inserción
   void saveTemplatesAll(merged);
-
   return merged;
 }
 
-/* =========================
-   Instanciar sesión desde plantilla
-   ========================= */
+/** Merge por nombre, sin ordenar alfabéticamente (conserva el orden de llegada). */
+function mergeByName(a: RoutineTemplate[], b: RoutineTemplate[]): RoutineTemplate[] {
+  const map = new Map<string, RoutineTemplate>();
+  for (const t of a) if (!map.has(t.name)) map.set(t.name, t);
+  for (const t of b) map.set(t.name, t);
+  return Array.from(map.values());
+}
 
+/* ───────────── Conversión plantilla → sesión del día ───────────── */
 export function routineToSession(t: RoutineTemplate): Session {
-  const exerciseLogs: ExerciseLog[] = t.exercises.map((ex) => ({
-    exercise_ref: { id: ex.id, version: 1 },
+  const logs: ExerciseLog[] = t.exercises.map(ex => ({
+    exercise_ref: { id: ex.id, version: 1 }, // ⟵ ID estable para enlazar histórico
     name_snapshot: ex.name,
     scheme_snapshot: ex.scheme,
-    sets_snapshot: ex.sets.map((s, idx) => normalizeSetDef(s, idx)),
+    sets_snapshot: ex.sets,
     setLogs: [],
     completedSets: 0,
     totalSetsPlan: ex.sets.length
@@ -171,6 +171,6 @@ export function routineToSession(t: RoutineTemplate): Session {
     session_id: rid(),
     date: new Date().toISOString(),
     workoutName: t.name,
-    exerciseLogs
+    exerciseLogs: logs
   };
 }
