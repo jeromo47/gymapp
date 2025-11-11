@@ -49,7 +49,7 @@ export function RoutineEditor() {
 
   const renameRoutine = (newName: string) => {
     if (!current) return;
-    // cambiar el nombre manteniendo posición
+    // cambiar solo el nombre manteniendo posición
     setTemplates(prev => {
       const idx = prev.findIndex(t => t.name === current.name);
       if (idx < 0) return prev;
@@ -76,7 +76,7 @@ export function RoutineEditor() {
       exercises: [
         ...r.exercises,
         {
-          id: slug(`Ejercicio ${r.exercises.length + 1}`),
+          id: crypto.randomUUID(), // ⟵ id estable (no depende del nombre)
           name: `Ejercicio ${r.exercises.length + 1}`,
           scheme: "3xSET 8–12",
           sets: [
@@ -152,7 +152,7 @@ export function RoutineEditor() {
             <>
               <input
                 value={current.name}
-                onChange={(e) => renameRoutine(e.target.value)}
+                onChange={(e) => renameRoutine(e.target.value)} // ⟵ NO cambia id
                 className="input"
                 style={{ minWidth: 220 }}
                 placeholder="Nombre de la rutina"
@@ -181,7 +181,7 @@ export function RoutineEditor() {
                   <input
                     className="input"
                     value={ex.name}
-                    onChange={(e) => updateExercise(ex, { name: e.target.value, id: slug(e.target.value) })}
+                    onChange={(e) => updateExercise(ex, { name: e.target.value })} // ⟵ id NO se toca
                     placeholder="Nombre del ejercicio"
                     style={{ minWidth: 220 }}
                   />
@@ -271,9 +271,6 @@ export function RoutineEditor() {
 }
 
 /* utils */
-function slug(s: string) {
-  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-}
 function clampInt(v: string, min: number, max: number) {
   const n = Math.max(min, Math.min(max, parseInt(v || "0", 10)));
   return Number.isFinite(n) ? n : min;
